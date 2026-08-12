@@ -129,3 +129,7 @@ pip install pyinstaller
 ```bash
 pyinstaller --noconsole --onefile --name SnipTag run.py
 ```
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
