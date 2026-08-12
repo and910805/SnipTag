@@ -1,0 +1,159 @@
+"""主題快速輸入框與完整設定視窗。"""
+from __future__ import annotations
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
+    QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget,
+)
+
+from .naming import Namer
+
+TEMPLATE_HELP = (
+    "可用欄位：{topic} 主題、{n} 流水號、{date} 20260812、"
+    "{date2} 08-12、{time} 143005、{datetime}\n"
+    "補零寫法：{n:02d} → 01、{n:03d} → 001"
+)
+
+
+class TopicDialog(QDialog):
+    """Ctrl+F1 叫出來的小視窗：換主題，編號自動從 01 重新開始。"""
+
+    def __init__(self, config, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.cfg = config
+        self.setWindowTitle("設定主題")
+        self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
+        self.setMinimumWidth(360)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("這場會議 / 這個題目的名稱："))
+
+        self.combo = QComboBox(self)
+        self.combo.setEditable(True)
+        self.combo.addItems(self.cfg["recent_topics"])
+        self.combo.setCurrentText(self.cfg["topic"])
+        self.combo.lineEdit().selectAll()
+        layout.addWidget(self.combo)
+
+        self.preview = QLabel(self)
+        self.preview.setStyleSheet("color:#2d7ff9;")
+        layout.addWidget(self.preview)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=self
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self.combo.currentTextChanged.connect(self._refresh)
+        self._refresh()
+
+    def _refresh(self) -> None:
+        original = self.cfg["topic"]
+        self.cfg["topic"] = self.combo.currentText().strip() or "Topic"
+        try:
+            name = Namer(self.cfg).preview()
+        except Exception:
+            name = "?"
+        finally:
+            self.cfg["topic"] = original
+        self.preview.setText(f"下一張會存成：{name}")
+
+    def topic(self) -> str:
+        return self.combo.currentText().strip()
+
+
+class SettingsDialog(QDialog):
+    def __init__(self, config, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.cfg = config
+        self.setWindowTitle("SnipTag 設定")
+        self.setMinimumWidth(520)
+
+        form = QFormLayout()
+
+        self.topic_edit = QLineEdit(config["topic"], self)
+        form.addRow("目前主題", self.topic_edit)
+
+        folder_row = QHBoxLayout()
+        self.dir_edit = QLineEdit(config["save_dir"], self)
+        browse = QPushButton("瀏覽…", self)
+        browse.clicked.connect(self._browse)
+        folder_row.addWidget(self.dir_edit)
+        folder_row.addWidget(browse)
+        wrapper = QWidget(self)
+        wrapper.setLayout(folder_row)
+        form.addRow("存檔資料夾", wrapper)
+
+        self.template_edit = QLineEdit(config["template"], self)
+        form.addRow("檔名樣板", self.template_edit)
+        help_label = QLabel(TEMPLATE_HELP, self)
+        help_label.setStyleSheet("color:#888; font-size:11px;")
+        help_label.setWordWrap(True)
+        form.addRow("", help_label)
+
+        self.format_combo = QComboBox(self)
+        self.format_combo.addItems(["png", "jpg"])
+        self.format_combo.setCurrentText(config["format"])
+        form.addRow("影像格式", self.format_combo)
+
+        self.quality_spin = QSpinBox(self)
+        self.quality_spin.setRange(30, 100)
+        self.quality_spin.setValue(int(config["jpeg_quality"]))
+        form.addRow("JPG 品質", self.quality_spin)
+
+        self.subfolder_check = QCheckBox("每個主題各開一個子資料夾", self)
+        self.subfolder_check.setChecked(bool(config["subfolder_per_topic"]))
+        form.addRow("", self.subfolder_check)
+
+        self.copy_check = QCheckBox("存檔時同時複製到剪貼簿", self)
+        self.copy_check.setChecked(bool(config["copy_on_save"]))
+        form.addRow("", self.copy_check)
+
+        self.notify_check = QCheckBox("存檔後顯示通知", self)
+        self.notify_check.setChecked(bool(config["notify_on_save"]))
+        form.addRow("", self.notify_check)
+
+        self.hk_capture = QLineEdit(config["hotkey_capture"], self)
+        self.hk_quick = QLineEdit(config["hotkey_quickshot"], self)
+        self.hk_pin = QLineEdit(config["hotkey_pin"], self)
+        self.hk_topic = QLineEdit(config["hotkey_topic"], self)
+        form.addRow("熱鍵：框選截圖", self.hk_capture)
+        form.addRow("熱鍵：快速截圖存檔", self.hk_quick)
+        form.addRow("熱鍵：貼上為釘圖", self.hk_pin)
+        form.addRow("熱鍵：切換主題", self.hk_topic)
+        hotkey_note = QLabel("熱鍵改動需重新啟動 SnipTag 才生效。", self)
+        hotkey_note.setStyleSheet("color:#888; font-size:11px;")
+        form.addRow("", hotkey_note)
+
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=self
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _browse(self) -> None:
+        chosen = QFileDialog.getExistingDirectory(
+            self, "選擇存檔資料夾", self.dir_edit.text()
+        )
+        if chosen:
+            self.dir_edit.setText(chosen)
+
+    def apply_to_config(self) -> None:
+        self.cfg["save_dir"] = self.dir_edit.text().strip() or self.cfg["save_dir"]
+        self.cfg["template"] = self.template_edit.text().strip() or "{topic}_{n:02d}"
+        self.cfg["format"] = self.format_combo.currentText()
+        self.cfg["jpeg_quality"] = self.quality_spin.value()
+        self.cfg["subfolder_per_topic"] = self.subfolder_check.isChecked()
+        self.cfg["copy_on_save"] = self.copy_check.isChecked()
+        self.cfg["notify_on_save"] = self.notify_check.isChecked()
+        self.cfg["hotkey_capture"] = self.hk_capture.text().strip()
+        self.cfg["hotkey_quickshot"] = self.hk_quick.text().strip()
+        self.cfg["hotkey_pin"] = self.hk_pin.text().strip()
+        self.cfg["hotkey_topic"] = self.hk_topic.text().strip()
+        self.cfg.set_topic(self.topic_edit.text())  # 內含 save()
