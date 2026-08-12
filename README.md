@@ -12,7 +12,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D6?logo=windows&logoColor=white)](#系統需求)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-<img src="docs/02-toolbar.png" alt="SnipTag 框選畫面" width="820">
+<img src="docs/annotate.png" alt="SnipTag 框選與標註畫面" width="820">
 
 </div>
 
@@ -47,7 +47,8 @@ Shift+F1 框一下 → MDASH_03.png
 | 🏷️ | **主題式自動命名** | 設定一次主題，之後每張截圖自動接續編號 |
 | ⚡ | **零對話框存檔** | `Shift+F1` 放開滑鼠即存檔，工具列也會先告訴你下一張叫什麼 |
 | 🧮 | **編號掃描資料夾決定** | 不是記在設定檔，所以換主題、重開程式、刪檔都不會亂 |
-| 🪟 | **視窗自動偵測** | 滑鼠移到哪個視窗就框住哪個，點一下即可選取 |
+| ✏️ | **標註工具** | 矩形、橢圓、箭頭、直線、畫筆、螢光筆、馬賽克、文字，可復原 |
+| 🪟 | **輔助框自動偵測** | 滑鼠移到哪就框住哪，連視窗裡的子區塊都認得，點一下即選取 |
 | 🔍 | **像素放大鏡** | 顯示游標座標與該點色碼，方便精準對齊 |
 | 📌 | **釘圖到桌面** | 把截圖釘在最上層，可縮放、調透明度，對照資料很好用 |
 | 🖥️ | **混合 DPI 多螢幕** | 筆電 200% + 外接 100% 也不偏移，各自以原生解析度存檔 |
@@ -101,7 +102,7 @@ python -m sniptag
 **1. 設定這場會議的主題** —— 按 `Ctrl+F1`，輸入 `MDASH`。
 對話框會即時告訴你下一張會存成什麼。
 
-<img src="docs/05-topic.png" alt="設定主題" width="480">
+<img src="docs/topic.png" alt="設定主題" width="480">
 
 **2. 開始截圖** —— 按 `Shift+F1`，框一下，放開滑鼠。檔案已經存好了。
 
@@ -117,29 +118,36 @@ python -m sniptag
 
 放大鏡顯示游標座標與該點色碼，尺寸標籤顯示的是**實際會存下來的像素數**。
 
-<img src="docs/01-capture.png" alt="框選中" width="820">
+<img src="docs/capture.png" alt="框選中" width="820">
 
 ### 框選完成：工具列直接告訴你檔名
 
-左邊的 `→ MDASH_03.png` 就是按下「存檔」後的結果。框好之後還能拖曳邊角調整、整塊搬移。
+左下角的 `→ MDASH_03.png` 就是按下「存檔」後的結果。框好之後還能拖曳邊角調整、整塊搬移。
 
-<img src="docs/02-toolbar.png" alt="工具列" width="820">
+<img src="docs/toolbar.png" alt="工具列" width="820">
 
-### 視窗自動偵測：滑鼠移過去，點一下就好
+### 標註：矩形、箭頭、螢光筆、馬賽克、文字
 
-不用手動對齊視窗邊界。
+上排選工具與顏色粗細，畫錯了 `Ctrl`+`Z` 復原。標註是向量繪製，
+輸出時才畫到原生解析度上，所以在高 DPI 螢幕也不會糊。
 
-<img src="docs/03-window-detect.png" alt="視窗自動偵測" width="820">
+<img src="docs/annotate.png" alt="標註" width="820">
+
+### 輔助框：滑鼠移過去，點一下就好
+
+不用手動對齊邊界。除了整個視窗，也會認出視窗裡的子區塊 —— 游標停在哪一塊就框哪一塊。
+
+<img src="docs/window-detect.png" alt="輔助框自動偵測" width="820">
 
 ### 釘圖：把截圖釘在桌面最上層
 
 滾輪縮放、`Ctrl`+滾輪調透明度，對照兩份資料時很方便。
 
-<img src="docs/04-pin.png" alt="釘圖" width="820">
+<img src="docs/pin.png" alt="釘圖" width="820">
 
 ### 設定
 
-<img src="docs/06-settings.png" alt="設定" width="640">
+<img src="docs/settings.png" alt="設定" width="640">
 
 > 以上畫面由 [`docs/make_screenshots.py`](docs/make_screenshots.py) 產生，
 > 內容是合成的假桌面，任何人重跑都會得到一樣的圖。
@@ -162,7 +170,7 @@ python -m sniptag
 | 操作 | 說明 |
 | --- | --- |
 | 拖曳 | 框出範圍 |
-| 直接點一下 | 選取游標底下的整個視窗 |
+| 直接點一下 | 選取游標底下的視窗或子區塊 |
 | 拖曳邊角 / 中間 | 框好之後調整大小、整塊搬移 |
 | `Ctrl`+`A` | 選取整個桌面 |
 | `Enter` / `S` / 雙擊 | 自動命名存檔 |
@@ -170,6 +178,30 @@ python -m sniptag
 | `F` | 釘到桌面 |
 | `Ctrl`+`S` | 另存新檔（會跳對話框） |
 | `Esc` | 取消 |
+
+### 標註工具
+
+框好之後才會出現。選了工具之後，在框選範圍內拖曳即可繪製。
+
+| 熱鍵 | 工具 | 說明 |
+| --- | --- | --- |
+| `R` | 矩形 | 框住重點 |
+| `O` | 橢圓 | 圈起來 |
+| `A` | 箭頭 | 指向某處 |
+| `L` | 直線 | |
+| `P` | 畫筆 | 自由手繪 |
+| `H` | 螢光筆 | 半透明加寬，底下的字還看得見 |
+| `M` | 馬賽克 | 遮住機敏資訊 |
+| `T` | 文字 | 點一下輸入，`Enter` 完成 |
+
+| 熱鍵 | 功能 |
+| --- | --- |
+| `Ctrl`+`Z` | 復原 |
+| `Ctrl`+`Shift`+`Z` / `Ctrl`+`Y` | 重做 |
+| `Esc` | 取消目前工具（再按一次才會結束截圖） |
+
+顏色與粗細在工具列上直接選。標註是**向量繪製**，輸出時才畫到原生解析度上，
+所以線條在高 DPI 螢幕上不會糊掉，馬賽克也是取原始像素重新運算。
 
 ### 釘圖視窗
 
@@ -265,8 +297,9 @@ sniptag/
 ├─ config.py      設定讀寫
 ├─ naming.py      主題 + 流水號 → 檔名（掃描資料夾決定編號）
 ├─ screens.py     桌面擷取、逐螢幕 DPI 換算（DesktopShot）
-├─ winrects.py    列舉可見視窗邊界（EnumWindows + DWM）
+├─ winrects.py    列舉可見視窗與子區塊（EnumWindows / EnumChildWindows + DWM）
 ├─ overlay.py     全螢幕框選介面
+├─ annotate.py    標註圖形與圖層（含復原）
 ├─ pinwindow.py   釘圖視窗
 ├─ dialogs.py     主題 / 設定視窗
 ├─ hotkeys.py     全域熱鍵（RegisterHotKey + native event filter）
@@ -291,9 +324,14 @@ python test_naming.py
 python test_dpi.py
 ```
 
-`test_naming.py` 驗證命名與編號邏輯（換主題、刪檔、樣板、非法字元）。
-`test_dpi.py` 用模擬的雙螢幕組態（1440×900@200% + 1920×1080@100%）
-驗證座標換算與裁切解析度，不需要真的接上外接螢幕。
+```bash
+python test_annotate.py
+```
+
+- `test_naming.py` —— 命名與編號邏輯（換主題、刪檔、樣板、非法字元）
+- `test_dpi.py` —— 用模擬的雙螢幕組態（1440×900@200% + 1920×1080@100%）
+  驗證座標換算與裁切解析度，不需要真的接上外接螢幕
+- `test_annotate.py` —— 圖層的復原/重做，以及標註是否精準落在輸出影像的對應位置
 
 ### 重新產生文件截圖
 
@@ -329,9 +367,14 @@ SnipTag 啟動時會跳通知告訴你哪幾個熱鍵註冊失敗，到「設定
 不會。預設 PNG 無損，且以螢幕原生解析度存檔。需要小一點的檔案可以在設定裡改成 JPG。
 
 **和 Snipaste 有什麼不同？**
-Snipaste 成熟很多，標註、貼圖、色彩取樣等功能都更完整，日常使用建議還是用它。
-SnipTag 只專注在一件 Snipaste 沒有做的事：**連續截圖時的自動命名**。
-兩個可以並存，只要熱鍵錯開。
+Snipaste 成熟很多 —— 標註的細節（形狀可再編輯、序號標記、取色器等）、
+貼圖的各種行為都做得更完整，日常使用它仍然是很好的選擇。
+SnipTag 補上的是 Snipaste 沒有做的那件事：**連續截圖時的自動命名**，
+再把常用的標註工具做到夠用。兩個可以並存，只要熱鍵錯開。
+
+**標註畫完之後還能修改嗎？**
+目前不行，畫上去就固定了，只能 `Ctrl`+`Z` 一路復原。
+需要反覆調整的場合，建議先存檔再用專門的編輯器處理。
 
 ---
 

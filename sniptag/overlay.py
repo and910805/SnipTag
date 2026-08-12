@@ -1,4 +1,4 @@
-"""全螢幕框選介面：暗化背景、拖曳選取、視窗自動偵測、放大鏡、動作工具列。
+"""全螢幕框選介面：暗化背景、拖曳選取、視窗自動偵測、放大鏡、標註、動作工具列。
 
 所有換算都交給 DesktopShot 逐螢幕處理，因此混合 DPI（筆電 + 外接螢幕）
 不需要任何設定，接上就對。
@@ -7,11 +7,13 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPoint, QRect, QSize, Qt, Signal
 from PySide6.QtGui import (
-    QColor, QCursor, QFont, QFontMetrics, QPainter, QPen, QPixmap, QRegion,
+    QColor, QCursor, QFont, QFontMetrics, QImage, QPainter, QPen, QPixmap, QRegion,
 )
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
+from PySide6.QtWidgets import (
+    QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget,
+)
 
-from . import winrects
+from . import annotate, winrects
 from .screens import DesktopShot
 
 ACCENT = QColor("#2d7ff9")
@@ -25,17 +27,33 @@ TOOLBAR_QSS = """
 QWidget#toolbar { background: #23262b; border: 1px solid #3a3f47; border-radius: 6px; }
 QPushButton {
     background: #2f343b; color: #e8eaed; border: none; border-radius: 4px;
-    padding: 5px 11px; font-size: 12px;
+    padding: 5px 10px; font-size: 12px;
 }
 QPushButton:hover { background: #3d434c; }
+QPushButton:checked { background: #2d7ff9; color: white; }
 QPushButton#primary { background: #2d7ff9; color: white; font-weight: bold; }
 QPushButton#primary:hover { background: #4a92fb; }
-QLabel#name { color: #9fd18a; font-size: 12px; padding: 0 8px; }
+QPushButton#swatch { border: 2px solid #23262b; border-radius: 9px; padding: 0; }
+QPushButton#swatch:checked { border: 2px solid #e8eaed; }
+QLabel#name { color: #9fd18a; font-size: 12px; padding: 0 6px; }
+QFrame#sep { background: #3a3f47; }
+QLineEdit#inline {
+    background: rgba(20, 22, 26, 220); color: white; border: 1px solid #2d7ff9;
+    border-radius: 3px; padding: 2px 6px;
+}
 """
 
 
+def _separator() -> QFrame:
+    line = QFrame()
+    line.setObjectName("sep")
+    line.setFixedWidth(1)
+    line.setFrameShape(QFrame.VLine)
+    return line
+
+
 class Toolbar(QWidget):
-    """選取完成後浮出來的動作列。"""
+    """選取完成後浮出來的工具列：上排標註工具，下排輸出動作。"""
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
@@ -43,13 +61,55 @@ class Toolbar(QWidget):
         self.setStyleSheet(TOOLBAR_QSS)
         self.setCursor(Qt.ArrowCursor)
 
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(6)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(8, 6, 8, 6)
+        outer.setSpacing(6)
 
+        # --- 上排：標註工具 ---
+        tools = QHBoxLayout()
+        tools.setSpacing(4)
+        self.tool_buttons: dict[str, QPushButton] = {}
+        for key, label, shortcut in annotate.TOOL_LABELS:
+            button = self._button(f"{label} {shortcut}", checkable=True)
+            tools.addWidget(button)
+            self.tool_buttons[key] = button
+        tools.addWidget(_separator())
+
+        self.color_buttons: dict[str, QPushButton] = {}
+        for color in annotate.PALETTE:
+            button = self._button("", checkable=True)
+            button.setObjectName("swatch")
+            button.setFixedSize(18, 18)
+            button.setStyleSheet(
+                f"QPushButton#swatch {{ background: {color};"
+                f" border: 2px solid #23262b; border-radius: 9px; }}"
+                f"QPushButton#swatch:checked {{ border: 2px solid #e8eaed; }}"
+            )
+            tools.addWidget(button)
+            self.color_buttons[color] = button
+        tools.addWidget(_separator())
+
+        self.width_buttons: dict[int, QPushButton] = {}
+        for label, value in annotate.WIDTHS:
+            button = self._button(label, checkable=True)
+            tools.addWidget(button)
+            self.width_buttons[value] = button
+        tools.addWidget(_separator())
+
+        self.undo_button = self._button("復原 Ctrl+Z")
+        self.clear_button = self._button("清除")
+        tools.addWidget(self.undo_button)
+        tools.addWidget(self.clear_button)
+        tools.addStretch(1)
+        outer.addLayout(tools)
+
+        # --- 下排：輸出動作 ---
+        actions = QHBoxLayout()
+        actions.setSpacing(6)
         self.name_label = QLabel(self)
         self.name_label.setObjectName("name")
-        layout.addWidget(self.name_label)
+        actions.addWidget(self.name_label)
+        actions.addStretch(1)
 
         self.buttons: dict[str, QPushButton] = {}
         for key, text, primary in (
@@ -59,18 +119,45 @@ class Toolbar(QWidget):
             ("saveas", "另存…  Ctrl+S", False),
             ("cancel", "取消  Esc", False),
         ):
-            button = QPushButton(text, self)
-            button.setFocusPolicy(Qt.NoFocus)
-            button.setCursor(Qt.PointingHandCursor)
+            button = self._button(text)
             if primary:
                 button.setObjectName("primary")
-            layout.addWidget(button)
+            actions.addWidget(button)
             self.buttons[key] = button
+        outer.addLayout(actions)
         self.adjustSize()
+
+    def _button(self, text: str, checkable: bool = False) -> QPushButton:
+        button = QPushButton(text, self)
+        button.setFocusPolicy(Qt.NoFocus)
+        button.setCursor(Qt.PointingHandCursor)
+        button.setCheckable(checkable)
+        return button
 
     def set_name(self, name: str) -> None:
         self.name_label.setText(f"→ {name}")
         self.adjustSize()
+
+    def sync(self, tool: str | None, style: annotate.Style) -> None:
+        for key, button in self.tool_buttons.items():
+            button.setChecked(key == tool)
+        for color, button in self.color_buttons.items():
+            button.setChecked(color.lower() == style.color.lower())
+        for value, button in self.width_buttons.items():
+            button.setChecked(value == style.width)
+
+
+class _ShotContext(annotate.Context):
+    """讓馬賽克拿得到底圖像素。"""
+
+    def __init__(self, shot: DesktopShot, origin: QPoint) -> None:
+        self.shot = shot
+        self.origin = origin
+
+    def pixels(self, rect: QRect) -> QImage:
+        pixmap = self.shot.crop(rect.translated(self.origin))
+        pixmap.setDevicePixelRatio(1.0)
+        return pixmap.toImage()
 
 
 class Overlay(QWidget):
@@ -90,28 +177,47 @@ class Overlay(QWidget):
 
         self.shot = shot
         self.origin = shot.logical_geometry.topLeft()
+        self.context = _ShotContext(shot, self.origin)
         self.preview_cb = preview_cb
         self.quick = quick
 
         self.selection = QRect()
         self.anchor = QPoint()
         self.press_pos = QPoint()
-        self.mode: str | None = None      # drag / move / resize
+        self.mode: str | None = None      # drag / move / resize / annotate
         self.resize_handle: str | None = None
         self.settled = False
         self._emitted = False
 
+        # 標註
+        self.layer = annotate.Layer()
+        self.style = annotate.Style()
+        self.tool: str | None = None
+        self.pending = None               # 正在拖曳中的圖形
+        self.text_edit: QLineEdit | None = None
+
         self.setGeometry(shot.logical_geometry)
-        self.window_rects = self._logical_window_rects()
+        self.window_groups = self._logical_window_groups()
         self.hover_rect: QRect | None = None
 
         self.toolbar = Toolbar(self)
         self.toolbar.hide()
-        self.toolbar.buttons["save"].clicked.connect(lambda: self._emit("save"))
-        self.toolbar.buttons["copy"].clicked.connect(lambda: self._emit("copy"))
-        self.toolbar.buttons["pin"].clicked.connect(lambda: self._emit("pin"))
-        self.toolbar.buttons["saveas"].clicked.connect(lambda: self._emit("saveas"))
+        self._wire_toolbar()
+
+    def _wire_toolbar(self) -> None:
+        for key in ("save", "copy", "pin", "saveas"):
+            self.toolbar.buttons[key].clicked.connect(
+                lambda _=False, action=key: self._emit(action)
+            )
         self.toolbar.buttons["cancel"].clicked.connect(self.cancel)
+        for key, button in self.toolbar.tool_buttons.items():
+            button.clicked.connect(lambda _=False, tool=key: self.set_tool(tool))
+        for color, button in self.toolbar.color_buttons.items():
+            button.clicked.connect(lambda _=False, value=color: self.set_color(value))
+        for width, button in self.toolbar.width_buttons.items():
+            button.clicked.connect(lambda _=False, value=width: self.set_width(value))
+        self.toolbar.undo_button.clicked.connect(self.undo)
+        self.toolbar.clear_button.clicked.connect(self.clear_annotations)
 
     # --- 起手式 ---------------------------------------------------
     def start(self) -> None:
@@ -122,21 +228,52 @@ class Overlay(QWidget):
         self._update_hover(self._cursor_pos())
 
     def _cursor_pos(self) -> QPoint:
-        """游標在本視窗座標系的位置（產生說明用截圖時會被覆寫成固定值）。"""
         return self.mapFromGlobal(QCursor.pos())
 
-    def _logical_window_rects(self) -> list[QRect]:
-        """視窗的實體座標 → 本視窗的座標系（每台螢幕各自換算）。"""
-        rects = []
-        for left, top, right, bottom in winrects.list_window_rects():
-            rect = self.shot.physical_rect_to_logical(left, top, right, bottom)
-            rect = rect.translated(-self.origin).intersected(self.rect())
-            if rect.width() > 8 and rect.height() > 8:
-                rects.append(rect)
-        return rects
+    def _logical_window_groups(self) -> list[list[QRect]]:
+        """每個可見視窗一組：第一個是視窗本身，後面是它的子區塊。"""
+        groups: list[list[QRect]] = []
+        for window in winrects.list_window_groups():
+            converted = []
+            for left, top, right, bottom in window:
+                rect = self.shot.physical_rect_to_logical(left, top, right, bottom)
+                rect = rect.translated(-self.origin).intersected(self.rect())
+                if rect.width() > 8 and rect.height() > 8:
+                    converted.append(rect)
+            if converted:
+                groups.append(converted)
+        return groups
 
     def _to_global(self, rect: QRect) -> QRect:
         return rect.translated(self.origin)
+
+    # --- 標註設定 -------------------------------------------------
+    def set_tool(self, tool: str | None) -> None:
+        self.tool = None if tool == self.tool else tool
+        self._commit_text()
+        self.toolbar.sync(self.tool, self.style)
+        self.setCursor(Qt.CrossCursor if self.tool else Qt.ArrowCursor)
+        self.update()
+
+    def set_color(self, color: str) -> None:
+        self.style.color = color
+        self.toolbar.sync(self.tool, self.style)
+
+    def set_width(self, width: int) -> None:
+        self.style.width = width
+        self.toolbar.sync(self.tool, self.style)
+
+    def undo(self) -> None:
+        if self.layer.undo():
+            self.update()
+
+    def redo(self) -> None:
+        if self.layer.redo():
+            self.update()
+
+    def clear_annotations(self) -> None:
+        if self.layer.clear():
+            self.update()
 
     # --- 繪製 -----------------------------------------------------
     def paintEvent(self, _event) -> None:
@@ -144,16 +281,21 @@ class Overlay(QWidget):
         self.shot.paint(painter, self.origin)
 
         selection = self.selection.normalized()
-        if selection.isValid() and not selection.isEmpty():
-            region = QRegion(self.rect()) - QRegion(selection)
-        else:
-            region = QRegion(self.rect())
+        has_selection = selection.isValid() and not selection.isEmpty()
+        region = QRegion(self.rect())
+        if has_selection:
+            region = region - QRegion(selection)
         painter.save()
         painter.setClipRegion(region)
         painter.fillRect(self.rect(), DIM)
         painter.restore()
 
-        if selection.isValid() and not selection.isEmpty():
+        if has_selection:
+            painter.save()
+            painter.setClipRect(selection)
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            self.layer.draw(painter, self.context, self.pending)
+            painter.restore()
             self._paint_selection(painter, selection)
         elif self.hover_rect is not None:
             painter.setPen(QPen(ACCENT, 2, Qt.DashLine))
@@ -165,6 +307,7 @@ class Overlay(QWidget):
             self._paint_magnifier(painter)
 
     def _paint_selection(self, painter: QPainter, selection: QRect) -> None:
+        painter.setRenderHint(QPainter.Antialiasing, False)
         painter.setPen(QPen(ACCENT, 1))
         painter.setBrush(Qt.NoBrush)
         painter.drawRect(selection.adjusted(0, 0, -1, -1))
@@ -275,18 +418,27 @@ class Overlay(QWidget):
         return None
 
     def _update_hover(self, pos: QPoint) -> None:
-        self.hover_rect = next(
-            (rect for rect in self.window_rects if rect.contains(pos)), None
-        )
+        """取最上層那個視窗，再從它的子區塊裡挑面積最小的。"""
+        for group in self.window_groups:
+            if not group[0].contains(pos):
+                continue
+            inside = [rect for rect in group if rect.contains(pos)]
+            self.hover_rect = min(inside, key=lambda r: r.width() * r.height())
+            return
+        self.hover_rect = None
 
     def mousePressEvent(self, event) -> None:
         if event.button() != Qt.LeftButton:
             return
         pos = event.position().toPoint()
         self.press_pos = pos
+        self._commit_text()
+
         handle = self._handle_at(pos)
         if handle:
             self.mode, self.resize_handle = "resize", handle
+        elif self.settled and self.tool and self.selection.contains(pos):
+            self._begin_annotation(pos)
         elif self.settled and self.selection.normalized().contains(pos):
             self.mode = "move"
             self.anchor = pos - self.selection.normalized().topLeft()
@@ -298,9 +450,18 @@ class Overlay(QWidget):
             self.toolbar.hide()
         self.update()
 
+    def _begin_annotation(self, pos: QPoint) -> None:
+        if self.tool == "text":
+            self._open_text_editor(pos)
+            return
+        self.mode = "annotate"
+        self.pending = annotate.make_shape(self.tool, pos, pos, self.style)
+
     def mouseMoveEvent(self, event) -> None:
         pos = event.position().toPoint()
-        if self.mode == "drag":
+        if self.mode == "annotate":
+            self._extend_annotation(pos)
+        elif self.mode == "drag":
             self.selection = QRect(self.anchor, pos).normalized()
         elif self.mode == "move":
             selection = self.selection.normalized()
@@ -318,9 +479,18 @@ class Overlay(QWidget):
             self._resize_to(pos)
             self._place_toolbar()
         else:
-            self._update_hover(pos)
+            if not self.settled:
+                self._update_hover(pos)
             self.setCursor(self._cursor_for(pos))
         self.update()
+
+    def _extend_annotation(self, pos: QPoint) -> None:
+        if self.pending is None:
+            return
+        if hasattr(self.pending, "points"):
+            self.pending.points.append(pos)
+        else:
+            self.pending.end = pos
 
     def _cursor_for(self, pos: QPoint) -> Qt.CursorShape:
         handle = self._handle_at(pos)
@@ -332,7 +502,9 @@ class Overlay(QWidget):
                 "l": Qt.SizeHorCursor, "r": Qt.SizeHorCursor,
             }[handle]
         if self.settled and self.selection.normalized().contains(pos):
-            return Qt.SizeAllCursor
+            if self.tool == "text":
+                return Qt.IBeamCursor
+            return Qt.CrossCursor if self.tool else Qt.SizeAllCursor
         return Qt.CrossCursor
 
     def _resize_to(self, pos: QPoint) -> None:
@@ -352,8 +524,14 @@ class Overlay(QWidget):
         if event.button() != Qt.LeftButton:
             return
         pos = event.position().toPoint()
+
+        if self.mode == "annotate":
+            self._finish_annotation()
+            self.update()
+            return
+
         if self.mode == "drag" and (pos - self.press_pos).manhattanLength() < 6:
-            # 沒拖曳 = 選取游標底下的視窗
+            # 沒拖曳 = 選取游標底下的區塊
             self._update_hover(pos)
             self.selection = QRect(self.hover_rect) if self.hover_rect else QRect()
         self.mode = None
@@ -374,11 +552,55 @@ class Overlay(QWidget):
         self._show_toolbar()
         self.update()
 
+    def _finish_annotation(self) -> None:
+        self.mode = None
+        shape = self.pending
+        self.pending = None
+        if shape is None:
+            return
+        if hasattr(shape, "points"):
+            if len(shape.points) > 1:
+                self.layer.add(shape)
+            return
+        if (shape.end - shape.start).manhattanLength() >= 4:
+            self.layer.add(shape)
+
     def mouseDoubleClickEvent(self, event) -> None:
+        if self.tool:
+            return
         if self.settled and self.selection.normalized().contains(
             event.position().toPoint()
         ):
             self._emit("save")
+
+    # --- 文字工具 -------------------------------------------------
+    def _open_text_editor(self, pos: QPoint) -> None:
+        self._commit_text()
+        editor = QLineEdit(self)
+        editor.setObjectName("inline")
+        editor.setStyleSheet(TOOLBAR_QSS)
+        shape = annotate.TextShape(pos, "", self.style.copy())
+        editor.setFont(shape.font())
+        editor.setMinimumWidth(160)
+        editor.move(pos)
+        editor.setProperty("anchor", pos)
+        editor.returnPressed.connect(self._commit_text)
+        editor.show()
+        editor.setFocus()
+        self.text_edit = editor
+
+    def _commit_text(self) -> None:
+        editor = self.text_edit
+        if editor is None:
+            return
+        self.text_edit = None
+        text = editor.text().strip()
+        anchor = editor.property("anchor") or editor.pos()
+        editor.deleteLater()
+        if text:
+            self.layer.add(annotate.TextShape(anchor, text, self.style.copy()))
+        self.setFocus()
+        self.update()
 
     # --- 工具列 ---------------------------------------------------
     def _show_toolbar(self) -> None:
@@ -386,6 +608,7 @@ class Overlay(QWidget):
             self.toolbar.set_name(self.preview_cb())
         except Exception:
             self.toolbar.set_name("?")
+        self.toolbar.sync(self.tool, self.style)
         self.toolbar.show()
         self.toolbar.raise_()
         self._place_toolbar()
@@ -397,7 +620,7 @@ class Overlay(QWidget):
         size = self.toolbar.size()
         bounds = self.rect()
         x = min(max(bounds.left() + 4, selection.right() - size.width()),
-                bounds.right() - size.width() - 4)
+                max(bounds.left() + 4, bounds.right() - size.width() - 4))
         y = selection.bottom() + 8
         if y + size.height() > bounds.bottom():
             y = selection.top() - size.height() - 8
@@ -409,34 +632,72 @@ class Overlay(QWidget):
     def keyPressEvent(self, event) -> None:
         key, mods = event.key(), event.modifiers()
         if key == Qt.Key_Escape:
-            self.cancel()
-        elif key in (Qt.Key_Return, Qt.Key_Enter):
+            if self.text_edit is not None:
+                editor, self.text_edit = self.text_edit, None
+                editor.deleteLater()
+                self.setFocus()
+                self.update()
+            elif self.tool:
+                self.set_tool(None)
+            else:
+                self.cancel()
+            return
+        if key in (Qt.Key_Return, Qt.Key_Enter):
             self._emit("save")
-        elif key == Qt.Key_C and mods & Qt.ControlModifier:
-            self._emit("copy")
-        elif key == Qt.Key_S and mods & Qt.ControlModifier:
-            self._emit("saveas")
-        elif key == Qt.Key_A and mods & Qt.ControlModifier:
-            self.selection = QRect(self.rect())
-            self.settled = True
-            self._show_toolbar()
-            self.update()
-        elif key in (Qt.Key_S, Qt.Key_F) and not mods:
-            self._emit("save" if key == Qt.Key_S else "pin")
+            return
+        if mods & Qt.ControlModifier:
+            if key == Qt.Key_C:
+                self._emit("copy")
+            elif key == Qt.Key_S:
+                self._emit("saveas")
+            elif key == Qt.Key_Z:
+                self.redo() if mods & Qt.ShiftModifier else self.undo()
+            elif key == Qt.Key_Y:
+                self.redo()
+            elif key == Qt.Key_A:
+                self.selection = QRect(self.rect())
+                self.settled = True
+                self._show_toolbar()
+                self.update()
+            return
+        if self.settled and not mods:
+            for tool, _label, shortcut in annotate.TOOL_LABELS:
+                if key == getattr(Qt, f"Key_{shortcut}"):
+                    self.set_tool(tool)
+                    return
+        if key == Qt.Key_S and not mods:
+            self._emit("save")
+        elif key == Qt.Key_F and not mods:
+            self._emit("pin")
         else:
             super().keyPressEvent(event)
 
     # --- 收尾 -----------------------------------------------------
-    def crop(self) -> QPixmap:
+    def render_result(self) -> QPixmap:
+        """裁切 + 把標註畫上去，輸出為原生解析度。"""
         selection = self.selection.normalized().intersected(self.rect())
-        return self.shot.crop(self._to_global(selection))
+        pixmap = self.shot.crop(self._to_global(selection))
+        if not len(self.layer):
+            return pixmap
+
+        dpr = pixmap.devicePixelRatio() or 1.0
+        pixmap.setDevicePixelRatio(1.0)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.scale(dpr, dpr)
+        painter.translate(-selection.topLeft())
+        self.layer.draw(painter, self.context)
+        painter.end()
+        pixmap.setDevicePixelRatio(dpr)
+        return pixmap
 
     def _emit(self, action: str) -> None:
+        self._commit_text()
         selection = self.selection.normalized()
         if selection.width() < MIN_SELECTION or selection.height() < MIN_SELECTION:
             return
         self._emitted = True
-        pixmap = self.crop()
+        pixmap = self.render_result()
         global_rect = self._to_global(selection)
         self.close()
         self.finished.emit(pixmap, action, global_rect)

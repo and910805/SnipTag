@@ -1,6 +1,8 @@
-"""列舉桌面上可見視窗的範圍，用來做「滑鼠移到哪就框住哪個視窗」。
+"""列舉桌面上可見視窗（含其中的子區塊），用來做截圖時的輔助框。
 
-回傳順序即 Z 序（最上層在前），所以取第一個包含游標的矩形就是目標視窗。
+回傳的順序即 Z 序（最上層在前），每一組的第一個元素是視窗本身，
+後面接著它的子控制項 —— 讓框選時可以精準到視窗裡的某一塊，
+而不是只能框整個視窗。
 """
 from __future__ import annotations
 
@@ -10,15 +12,53 @@ from ctypes import wintypes
 
 DWMWA_EXTENDED_FRAME_BOUNDS = 9
 DWMWA_CLOAKED = 14
-GWL_STYLE = -16
 GWL_EXSTYLE = -20
-WS_VISIBLE = 0x10000000
 WS_EX_TOOLWINDOW = 0x00000080
 MIN_SIDE = 24
+MIN_CHILD_SIDE = 32
+MAX_CHILDREN = 300
+
+Rect = tuple[int, int, int, int]
 
 
-def list_window_rects() -> list[tuple[int, int, int, int]]:
-    """實體像素座標的 (left, top, right, bottom) 清單。"""
+def _frame_rect(hwnd, user32, dwmapi) -> Rect | None:
+    rect = wintypes.RECT()
+    if dwmapi.DwmGetWindowAttribute(
+        hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, ctypes.byref(rect), ctypes.sizeof(rect)
+    ) != 0:
+        if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            return None
+    return rect.left, rect.top, rect.right, rect.bottom
+
+
+def _children(hwnd, user32) -> list[Rect]:
+    """視窗內的子控制項範圍（用 GetWindowRect，已是螢幕座標）。"""
+    found: list[Rect] = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def callback(child, _lparam):
+        if len(found) >= MAX_CHILDREN:
+            return False
+        if not user32.IsWindowVisible(child):
+            return True
+        rect = wintypes.RECT()
+        if not user32.GetWindowRect(child, ctypes.byref(rect)):
+            return True
+        if (rect.right - rect.left < MIN_CHILD_SIDE
+                or rect.bottom - rect.top < MIN_CHILD_SIDE):
+            return True
+        found.append((rect.left, rect.top, rect.right, rect.bottom))
+        return True
+
+    try:
+        user32.EnumChildWindows(hwnd, callback, 0)
+    except Exception:
+        return []
+    return found
+
+
+def list_window_groups() -> list[list[Rect]]:
+    """Z 序由上而下；每組 = [視窗本身, 子區塊...]，座標為實體像素。"""
     if sys.platform != "win32":
         return []
     try:
@@ -31,13 +71,11 @@ def list_window_rects() -> list[tuple[int, int, int, int]]:
     get_long.restype = ctypes.c_ssize_t
     get_long.argtypes = [wintypes.HWND, ctypes.c_int]
 
-    rects: list[tuple[int, int, int, int]] = []
+    groups: list[list[Rect]] = []
 
     @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
     def callback(hwnd, _lparam):
-        if not user32.IsWindowVisible(hwnd):
-            return True
-        if user32.IsIconic(hwnd):
+        if not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd):
             return True
         if get_long(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW:
             return True
@@ -48,20 +86,21 @@ def list_window_rects() -> list[tuple[int, int, int, int]]:
         ) == 0 and cloaked.value:
             return True  # 例如切到別的虛擬桌面的視窗
 
-        rect = wintypes.RECT()
-        if dwmapi.DwmGetWindowAttribute(
-            hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, ctypes.byref(rect), ctypes.sizeof(rect)
-        ) != 0:
-            if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
-                return True
-
-        if rect.right - rect.left < MIN_SIDE or rect.bottom - rect.top < MIN_SIDE:
+        frame = _frame_rect(hwnd, user32, dwmapi)
+        if frame is None:
             return True
-        rects.append((rect.left, rect.top, rect.right, rect.bottom))
+        if frame[2] - frame[0] < MIN_SIDE or frame[3] - frame[1] < MIN_SIDE:
+            return True
+        groups.append([frame] + _children(hwnd, user32))
         return True
 
     try:
         user32.EnumWindows(callback, 0)
     except Exception:
         return []
-    return rects
+    return groups
+
+
+def list_window_rects() -> list[Rect]:
+    """只要最上層視窗的範圍（保留給不需要子區塊的呼叫端）。"""
+    return [group[0] for group in list_window_groups()]

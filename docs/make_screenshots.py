@@ -17,6 +17,7 @@ from PySide6.QtGui import (  # noqa: E402
 )
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+from sniptag import annotate  # noqa: E402
 from sniptag.config import DEFAULTS  # noqa: E402
 from sniptag.dialogs import SettingsDialog, TopicDialog  # noqa: E402
 from sniptag.overlay import Overlay  # noqa: E402
@@ -212,7 +213,7 @@ class DemoOverlay(Overlay):
     def __init__(self, shot, preview, cursor: QPoint) -> None:
         super().__init__(shot, lambda: preview)
         self.demo_cursor = cursor
-        self.window_rects = [SLIDE, NOTES, FILES]
+        self.window_groups = [[SLIDE], [NOTES], [FILES]]
 
     def _cursor_pos(self) -> QPoint:
         return self.demo_cursor
@@ -277,7 +278,7 @@ def main() -> None:
     overlay = DemoOverlay(shot, "MDASH_03.png", handle)
     overlay.selection = QRect(QPoint(88, 186), handle)
     overlay.settled = False
-    save(overlay.grab(), "01-capture.png")
+    save(overlay.grab(), "capture.png")
     overlay.close()
 
     # 2. 框選完成：控制點 + 工具列（含下一個檔名）
@@ -285,13 +286,33 @@ def main() -> None:
     overlay.selection = QRect(72, 186, 812, 364)
     overlay.settled = True
     overlay._show_toolbar()
-    save(overlay.grab(), "02-toolbar.png")
+    save(overlay.grab(), "toolbar.png")
     overlay.close()
 
-    # 3. 視窗自動偵測：還沒拖曳，游標停在筆記視窗上
+    # 3. 標註：矩形、箭頭、螢光筆、馬賽克、文字全部用上
+    overlay = DemoOverlay(shot, "MDASH_03.png", QPoint(-1, -1))
+    overlay.selection = QRect(72, 186, 812, 364)
+    overlay.settled = True
+    red = annotate.Style("#f5423f", 4)
+    blue = annotate.Style("#2d7ff9", 4)
+    overlay.layer.add(annotate.RectShape(QPoint(500, 196), QPoint(878, 320), red))
+    overlay.layer.add(annotate.ArrowShape(QPoint(320, 470), QPoint(520, 270), red))
+    overlay.layer.add(annotate.MarkerShape(
+        [QPoint(126, 256), QPoint(300, 256)], annotate.Style("#ff9f1c", 5)))
+    overlay.layer.add(annotate.MosaicShape(QPoint(126, 290), QPoint(300, 312),
+                                           annotate.Style()))
+    overlay.layer.add(annotate.TextShape(QPoint(196, 496), "這段是重點", red))
+    overlay.layer.add(annotate.EllipseShape(QPoint(520, 330), QPoint(700, 372), blue))
+    overlay.style = red
+    overlay.tool = "rect"
+    overlay._show_toolbar()
+    save(overlay.grab(), "annotate.png")
+    overlay.close()
+
+    # 4. 視窗自動偵測：還沒拖曳，游標停在筆記視窗上
     overlay = DemoOverlay(shot, "MDASH_03.png", NOTES.center())
     overlay.hover_rect = NOTES
-    save(overlay.grab(), "03-window-detect.png")
+    save(overlay.grab(), "window-detect.png")
     overlay.close()
 
     # 4. 釘圖：把兩塊裁切結果釘在桌面上
@@ -312,7 +333,7 @@ def main() -> None:
         painter.setBrush(Qt.NoBrush)
         painter.drawRect(rect.adjusted(0, 0, -1, -1))
     painter.end()
-    save(canvas, "04-pin.png")
+    save(canvas, "pin.png")
 
     # 5. 主題對話框
     config = dict(DEFAULTS)
@@ -333,11 +354,11 @@ def main() -> None:
         (OUT / "_preview" / f"MDASH_{index:02d}.png").write_bytes(b"")
 
     topic_dialog = TopicDialog(demo_config)
-    save_raw(panel(grab_dialog(topic_dialog)), "05-topic.png")
+    save_raw(panel(grab_dialog(topic_dialog)), "topic.png")
     topic_dialog.close()
 
     settings = SettingsDialog(demo_config)
-    save_raw(panel(grab_dialog(settings)), "06-settings.png")
+    save_raw(panel(grab_dialog(settings)), "settings.png")
     settings.close()
 
     for leftover in (OUT / "_preview").glob("*.png"):
