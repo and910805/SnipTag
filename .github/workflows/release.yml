@@ -41,6 +41,15 @@ jobs:
       - name: 打包 exe
         run: python build.py
 
+      - name: 產生 SHA256
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash dist/SnipTag.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  SnipTag.exe" | Out-File -FilePath dist/SnipTag.exe.sha256 `
+            -Encoding utf8 -NoNewline
+          "SHA256=$hash" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "SHA256: $hash"
+
       - name: 保留產物
         uses: actions/upload-artifact@v4
         with:
@@ -77,12 +86,30 @@ jobs:
 
           ## 注意
 
-          - 這個 exe 沒有程式碼簽章，Windows SmartScreen 可能會跳「不明的發行者」。
-            按「其他資訊」→「仍要執行」即可，或自行從原始碼建置（`python build.py`）。
+          ## 檔案驗證
+
+          這個 exe 沒有程式碼簽章，Windows SmartScreen 或防毒可能會跳「不明的發行者」。
+          按「其他資訊」→「仍要執行」即可，或自行從原始碼建置（`python build.py`）。
+
+          檔案是由 GitHub Actions 從本 repo 的原始碼建出來的，可以比對雜湊值：
+
+          ```powershell
+          Get-FileHash .\SnipTag.exe -Algorithm SHA256
+          ```
+
+          ```
+          __SHA256__
+          ```
+
+          已啟用 Smart App Control 的電腦會直接擋掉未簽章的執行檔，那種情況請改用原始碼執行。
+
+          ## 其他
           - 若已經有別的截圖工具綁在 `F1` / `F3`，熱鍵會被它搶走。SnipTag 啟動時
             會通知你哪個熱鍵註冊失敗，到「設定…」換一組即可。
           '@
-          $notes.Replace("__REPO__", $repo) | Out-File -FilePath notes.md -Encoding utf8
-          gh release create "$env:GITHUB_REF_NAME" dist/SnipTag.exe `
+          $notes = $notes.Replace("__REPO__", $repo).Replace("__SHA256__", $env:SHA256)
+          $notes | Out-File -FilePath notes.md -Encoding utf8
+          gh release create "$env:GITHUB_REF_NAME" `
+            dist/SnipTag.exe dist/SnipTag.exe.sha256 `
             --title "SnipTag $env:GITHUB_REF_NAME" `
             --notes-file notes.md
