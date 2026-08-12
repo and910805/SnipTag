@@ -85,26 +85,26 @@ def window_frame(painter: QPainter, rect: QRect, title: str, dark: bool = False)
 
 
 def draw_slide(painter: QPainter) -> None:
-    body = window_frame(painter, SLIDE, "MDASH 架構說明 — 簡報.pptx")
+    body = window_frame(painter, SLIDE, "本週進度 — 簡報.pptx")
     painter.setPen(INK)
     painter.setFont(font(21, bold=True))
     painter.drawText(body.x() + 40, body.y() + 26, body.width() - 80, 46,
-                     Qt.AlignLeft | Qt.AlignVCenter, "兩種 MDASH 掃描路徑")
+                     Qt.AlignLeft | Qt.AlignVCenter, "兩種資料匯入方式")
 
     painter.setPen(QColor("#dfe4ea"))
     painter.drawLine(body.x() + 40, body.y() + 82, body.right() - 40, body.y() + 82)
 
     columns = [
-        ("Option 1：Remote Scan", [
-            "由平台端直接連線至目標儲存庫",
-            "需要 organization 層級的授權",
+        ("方式 A：線上同步", [
+            "由系統定時連線來源端取得資料",
+            "需要來源方開通存取權限",
             "適合集中控管、統一排程",
             "不需在每台機器安裝工具",
         ]),
-        ("Option 2：Local CLI", [
-            "在本機執行命令列工具掃描",
-            "不限儲存平台，任何來源都可以",
-            "需先取得完整的本機副本",
+        ("方式 B：本機匯入", [
+            "由承辦人手動上傳檔案匯入",
+            "不限來源格式，CSV 或 Excel 皆可",
+            "需先自行整理成指定欄位",
             "適合離線或受限網段環境",
         ]),
     ]
@@ -134,7 +134,7 @@ def draw_slide(painter: QPainter) -> None:
     painter.setFont(font(8))
     painter.drawText(body.x() + 40, body.bottom() - 40, body.width() - 80, 24,
                      Qt.AlignLeft | Qt.AlignVCenter,
-                     "補充說明：兩種路徑取得的掃描結果格式相同，可直接匯入同一份報告。")
+                     "補充說明：兩種方式匯入後的資料格式相同，可直接產出同一份報表。")
     painter.drawText(body.right() - 90, body.bottom() - 40, 50, 24,
                      Qt.AlignRight | Qt.AlignVCenter, "06 / 21")
 
@@ -144,12 +144,12 @@ def draw_notes(painter: QPainter) -> None:
     painter.setPen(QColor("#9fb0c6"))
     painter.setFont(font(11, bold=True))
     painter.drawText(body.x() + 22, body.y() + 16, body.width() - 44, 26,
-                     Qt.AlignLeft | Qt.AlignVCenter, "MDASH 導入討論")
+                     Qt.AlignLeft | Qt.AlignVCenter, "本週討論事項")
     painter.setFont(font(9))
     painter.setPen(QColor("#7d8ea6"))
     notes = [
-        "· 先確認授權範圍與適用單位",
-        "· 掃描頻率：每週一次排程",
+        "· 先確認兩種方式的適用範圍",
+        "· 同步頻率：每週一次排程",
         "· 結果統一匯入既有報表",
         "· 下次會議前補上成本估算",
         "",
@@ -163,7 +163,7 @@ def draw_notes(painter: QPainter) -> None:
 def draw_files(painter: QPainter) -> None:
     body = window_frame(painter, FILES, "SnipTag — 檔案總管")
     painter.setFont(font(9))
-    names = ["MDASH_01.png", "MDASH_02.png", "MDASH_03.png"]
+    names = ["週會_01.png", "週會_02.png", "週會_03.png"]
     for index, name in enumerate(names):
         top = body.y() + 16 + index * 44
         painter.setPen(Qt.NoPen)
@@ -286,14 +286,14 @@ def main() -> None:
 
     # 1. 拖曳框選中：暗化 + 尺寸標籤 + 放大鏡停在文字上（看得出逐像素放大）
     handle = QPoint(620, 348)   # 停在文字上，放大鏡才看得出逐像素
-    overlay = DemoOverlay(shot, "MDASH_03.png", handle)
+    overlay = DemoOverlay(shot, "週會_03.png", handle)
     overlay.selection = QRect(QPoint(88, 186), handle)
     overlay.settled = False
     save(overlay.grab(), "capture.png")
     overlay.close()
 
     # 2. 框選完成：控制點 + 工具列（含下一個檔名）
-    overlay = DemoOverlay(shot, "MDASH_03.png", QPoint(-1, -1))
+    overlay = DemoOverlay(shot, "週會_03.png", QPoint(-1, -1))
     overlay.selection = QRect(72, 186, 812, 364)
     overlay.settled = True
     overlay._show_toolbar()
@@ -301,7 +301,7 @@ def main() -> None:
     overlay.close()
 
     # 3. 標註：矩形、箭頭、螢光筆、馬賽克、文字全部用上
-    overlay = DemoOverlay(shot, "MDASH_03.png", QPoint(-1, -1))
+    overlay = DemoOverlay(shot, "週會_03.png", QPoint(-1, -1))
     overlay.selection = QRect(72, 186, 812, 364)
     overlay.settled = True
     red = annotate.Style("#f5423f", 4)
@@ -324,7 +324,7 @@ def main() -> None:
     overlay.close()
 
     # 4. 視窗自動偵測：還沒拖曳，游標停在筆記視窗上
-    overlay = DemoOverlay(shot, "MDASH_03.png", NOTES.center())
+    overlay = DemoOverlay(shot, "週會_03.png", NOTES.center())
     overlay.hover_rect = NOTES
     save(overlay.grab(), "window-detect.png")
     overlay.close()
@@ -351,8 +351,8 @@ def main() -> None:
 
     # 5. 主題對話框
     config = dict(DEFAULTS)
-    config["topic"] = "MDASH"
-    config["recent_topics"] = ["MDASH", "資安月報", "08-12 部務會議"]
+    config["topic"] = "週會"
+    config["recent_topics"] = ["週會", "產品簡報", "08-12 教育訓練"]
     # 用通用路徑，避免把產圖者的使用者名稱寫進文件
     config["save_dir"] = r"C:\Users\you\Pictures\SnipTag"
 
@@ -365,7 +365,7 @@ def main() -> None:
     demo_config = DemoConfig(config)
     (OUT / "_preview").mkdir(exist_ok=True)
     for index in (1, 2):
-        (OUT / "_preview" / f"MDASH_{index:02d}.png").write_bytes(b"")
+        (OUT / "_preview" / f"週會_{index:02d}.png").write_bytes(b"")
 
     topic_dialog = TopicDialog(demo_config)
     save_raw(panel(grab_dialog(topic_dialog)), "topic.png")
@@ -382,7 +382,7 @@ def main() -> None:
         QRect(72, 96, 816, 90), QRect(952, 78, 440, 366),
     )):
         piece = shot.crop(region)
-        history.add(piece, f"MDASH_{index + 1:02d}.png" if index < 3 else "")
+        history.add(piece, f"週會_{index + 1:02d}.png" if index < 3 else "")
     history_dialog = HistoryDialog(history, _NullApp())
     save_raw(panel(grab_dialog(history_dialog)), "history.png")
     history_dialog.close()

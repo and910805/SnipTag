@@ -138,7 +138,7 @@ def main() -> None:
 
     print("文字")
     probe = new_overlay(shot)
-    probe.layer.add(annotate.TextShape(QPoint(200, 200), "MDASH",
+    probe.layer.add(annotate.TextShape(QPoint(200, 200), "週會",
                                        annotate.Style(color="#f5423f", width=4)))
     check(probe.render_result().toImage() != probe.shot.crop(SELECTION).toImage(),
           "文字有被畫上去")

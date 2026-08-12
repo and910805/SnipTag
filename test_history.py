@@ -21,7 +21,7 @@ class FakeApp:
 
     def save_pixmap(self, _pixmap, record=True):
         self.calls.append(f"save(record={record})")
-        return type("P", (), {"name": "MDASH_07.png"})()
+        return type("P", (), {"name": "週會_07.png"})()
 
     def copy_to_clipboard(self, _pixmap):
         self.calls.append("copy")
@@ -69,7 +69,7 @@ def main() -> None:
 
     print("對話框")
     history = History()
-    history.add(swatch(30), "MDASH_01.png")
+    history.add(swatch(30), "週會_01.png")
     history.add(swatch(30))
     fake = FakeApp()
     dialog = HistoryDialog(history, fake)
@@ -83,7 +83,7 @@ def main() -> None:
     dialog.save_selected()
     check(fake.calls[-1] == "save(record=False)",
           "從歷史存檔不會再寫回歷史（避免無限增生）")
-    check(dialog.selected().name == "MDASH_07.png", "存檔後標籤更新成檔名")
+    check(dialog.selected().name == "週會_07.png", "存檔後標籤更新成檔名")
 
     dialog.delete_selected()
     check(dialog.list.count() == 1 and len(history) == 1, "刪除後清單同步")
