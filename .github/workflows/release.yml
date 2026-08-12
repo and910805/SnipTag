@@ -11,6 +11,11 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      # runner 的 stdout 預設不是 UTF-8，測試印中文會 UnicodeEncodeError
+      PYTHONIOENCODING: utf-8
+      # 沒有實體桌面，用 Qt 的離螢幕平台
+      QT_QPA_PLATFORM: offscreen
     steps:
       - uses: actions/checkout@v4
 
@@ -23,8 +28,6 @@ jobs:
         run: pip install -r requirements.txt pyinstaller
 
       - name: 執行測試
-        env:
-          QT_QPA_PLATFORM: offscreen
         run: |
           python test_naming.py
           python test_dpi.py
@@ -33,8 +36,6 @@ jobs:
           python test_hotkeys.py
 
       - name: 打包 exe
-        env:
-          QT_QPA_PLATFORM: offscreen
         run: python build.py
 
       - name: 保留產物
