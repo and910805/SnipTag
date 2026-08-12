@@ -20,6 +20,7 @@ DEFAULTS = {
     "copy_on_save": True,          # 存檔同時複製到剪貼簿
     "notify_on_save": True,        # 存檔後跳通知
     "record_cancelled": False,     # 連按 Esc 取消的截圖也收進歷史
+    "seen_welcome": False,         # 第一次啟動會跳使用教學
     "recent_topics": [],
     # 輸出效果
     "round_corners": 0,            # 圓角半徑（邏輯像素，0 = 直角）

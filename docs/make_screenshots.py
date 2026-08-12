@@ -21,6 +21,7 @@ from sniptag import annotate  # noqa: E402
 from sniptag.config import DEFAULTS  # noqa: E402
 from sniptag.dialogs import SettingsDialog, TopicDialog  # noqa: E402
 from sniptag.history import History, HistoryDialog  # noqa: E402
+from sniptag.welcome import WelcomeDialog  # noqa: E402
 from sniptag.overlay import Overlay  # noqa: E402
 from sniptag.pinwindow import PinWindow  # noqa: E402
 from sniptag.screens import DesktopShot, Monitor  # noqa: E402
@@ -374,6 +375,14 @@ def main() -> None:
     settings = SettingsDialog(demo_config)
     save_raw(panel(grab_dialog(settings)), "settings.png")
     settings.close()
+
+    # 6b. 使用教學（第 1 與第 3 頁）
+    for page, name in ((0, "welcome.png"), (2, "welcome-annotate.png")):
+        tutorial = WelcomeDialog(demo_config)
+        tutorial.stack.setCurrentIndex(page)
+        tutorial._refresh()
+        save_raw(panel(grab_dialog(tutorial)), name)
+        tutorial.close()
 
     # 7. 截圖歷史
     history = History()

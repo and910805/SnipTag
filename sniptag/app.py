@@ -10,7 +10,7 @@ from PySide6.QtCore import QObject, QPoint, QRect, QTimer, Qt
 from PySide6.QtGui import QAction, QGuiApplication, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QFileDialog, QMenu, QMessageBox, QSystemTrayIcon
 
-from . import effects, screens, winrects
+from . import autostart, effects, screens, winrects
 from .config import Config
 from .dialogs import SettingsDialog, TopicDialog
 from .history import History, HistoryDialog
@@ -19,6 +19,7 @@ from .icon import app_icon
 from .naming import Namer
 from .overlay import Overlay
 from .pinwindow import PinWindow
+from .welcome import WelcomeDialog
 
 
 class SnipTagApp(QObject):
@@ -44,7 +45,10 @@ class SnipTagApp(QObject):
 
         self.hotkeys = HotkeyManager(qapp)
         self._register_hotkeys()
-        QTimer.singleShot(600, self._greet)
+        if self.cfg["seen_welcome"]:
+            QTimer.singleShot(600, self._greet)
+        else:
+            QTimer.singleShot(400, self.show_welcome)
 
     # --- 系統匣 ---------------------------------------------------
     def _build_menu(self) -> QMenu:
@@ -73,19 +77,43 @@ class SnipTagApp(QObject):
             ("解除所有滑鼠穿透", self.clear_click_through),
             ("關閉所有釘圖", self.close_all_pins),
             None,
+            # 開機自動啟動直接放選單上，不用進設定視窗找
+            ("開機時自動啟動", self.set_autostart, "autostart"),
+            ("使用教學…", self.show_welcome),
             ("設定…", self.open_settings),
             ("結束", self.quit),
         ]
+        self.autostart_action: QAction | None = None
         for entry in entries:
             if entry is None:
                 menu.addSeparator()
                 continue
-            text, slot = entry
+            text, slot = entry[0], entry[1]
             action = QAction(text, menu)
+            if len(entry) > 2 and entry[2] == "autostart":
+                action.setCheckable(True)
+                action.setEnabled(autostart.available())
+                self.autostart_action = action
             action.triggered.connect(slot)
             menu.addAction(action)
-        menu.aboutToShow.connect(self._refresh_tooltip)
+
+        menu.aboutToShow.connect(self._refresh_menu_state)
         return menu
+
+    def _refresh_menu_state(self) -> None:
+        self._refresh_tooltip()
+        if self.autostart_action is not None:
+            self.autostart_action.setChecked(autostart.is_enabled())
+
+    def set_autostart(self, enabled: bool) -> None:
+        if autostart.sync(enabled):
+            self.notify("開機自動啟動",
+                        "已開啟，下次登入會自動常駐。" if enabled else "已關閉。")
+        else:
+            self.notify("無法設定開機啟動",
+                        "寫入登錄檔失敗，可能被群組原則鎖住。",
+                        QSystemTrayIcon.Warning)
+        self._refresh_menu_state()
 
     def _refresh_tooltip(self) -> None:
         try:
@@ -329,6 +357,24 @@ class SnipTagApp(QObject):
     def _refresh_history_dialog(self) -> None:
         if self.history_dialog is not None and self.history_dialog.isVisible():
             self.history_dialog.reload()
+
+    # --- 教學 -----------------------------------------------------
+    def show_welcome(self) -> None:
+        first_run = not self.cfg["seen_welcome"]
+        # 教學裡有 F1 之類的說明，開著時先讓熱鍵不要亂觸發
+        self.hotkeys.unregister_all()
+        try:
+            dialog = WelcomeDialog(self.cfg)
+            dialog.setWindowIcon(self.icon)
+            dialog.exec()
+            if dialog.wants_autostart() != autostart.is_enabled():
+                autostart.sync(dialog.wants_autostart())
+        finally:
+            self.reload_hotkeys()
+        self.cfg["seen_welcome"] = True
+        self.cfg.save()
+        if first_run:
+            self.change_topic()
 
     # --- 設定 -----------------------------------------------------
     def change_topic(self) -> None:

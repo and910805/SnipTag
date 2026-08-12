@@ -102,7 +102,8 @@ python -m sniptag
 
 ### 開機自動啟動
 
-到「設定…」勾選 **「開機時自動啟動（常駐系統匣）」** 即可，按下 OK 立即生效。
+**系統匣圖示右鍵 → 勾選「開機時自動啟動」** 即可，馬上生效。
+第一次啟動的使用教學最後一頁、以及「設定…」裡也都有同一個選項。
 
 它寫的是目前使用者的登錄檔啟動項
 （`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`），
@@ -114,6 +115,17 @@ python -m sniptag
 
 > 用 exe 版的話，**搬動 `SnipTag.exe` 的位置之後要重新勾選一次**，
 > 因為啟動項記的是當初那個路徑。
+
+---
+
+## 第一次啟動
+
+會跳出一份五頁的使用教學，把核心流程講完 —— 主題命名、兩種截圖方式、
+標註、釘圖與歷史。最後一頁可以直接勾選開機自動啟動，關掉之後會請你設定第一個主題。
+
+<img src="docs/welcome.png" alt="使用教學" width="520">
+
+之後想再看一次，從系統匣圖示右鍵選「使用教學…」即可。
 
 ---
 
@@ -381,6 +393,7 @@ sniptag/
 ├─ toolicons.py   工具列圖示（程式畫出來的，沒有資源檔）
 ├─ effects.py     輸出效果：圓角、陰影、外框
 ├─ history.py     截圖歷史與瀏覽面板
+├─ welcome.py     第一次啟動的使用教學
 ├─ pinwindow.py   釘圖視窗
 ├─ dialogs.py     主題 / 設定視窗
 ├─ hotkeys.py     全域熱鍵（RegisterHotKey + native event filter）
@@ -426,6 +439,10 @@ python test_autostart.py
 python test_effects.py
 ```
 
+```bash
+python test_welcome.py
+```
+
 - `test_naming.py` —— 命名與編號邏輯（換主題、刪檔、樣板、非法字元）
 - `test_dpi.py` —— 用模擬的雙螢幕組態（1440×900@200% + 1920×1080@100%）
   驗證座標換算與裁切解析度，不需要真的接上外接螢幕
@@ -437,6 +454,7 @@ python test_effects.py
 - `test_autostart.py` —— 啟動命令的組成與登錄檔讀寫。用測試專用的值名稱，
   跑完會還原，不會動到你真正的啟動項
 - `test_effects.py` —— 圓角是否真的把角落切成透明、陰影外擴的尺寸與方向
+- `test_welcome.py` —— 教學的頁面導覽、邊界（第一頁不能再往前）與示意圖繪製
 
 ### 重新產生文件截圖
 
