@@ -119,7 +119,11 @@ class Overlay(QWidget):
         self.raise_()
         self.activateWindow()
         self.setFocus()
-        self._update_hover(self.mapFromGlobal(QCursor.pos()))
+        self._update_hover(self._cursor_pos())
+
+    def _cursor_pos(self) -> QPoint:
+        """游標在本視窗座標系的位置（產生說明用截圖時會被覆寫成固定值）。"""
+        return self.mapFromGlobal(QCursor.pos())
 
     def _logical_window_rects(self) -> list[QRect]:
         """視窗的實體座標 → 本視窗的座標系（每台螢幕各自換算）。"""
@@ -212,7 +216,7 @@ class Overlay(QWidget):
         painter.drawText(box, Qt.AlignCenter, text)
 
     def _paint_magnifier(self, painter: QPainter) -> None:
-        cursor = self.mapFromGlobal(QCursor.pos())
+        cursor = self._cursor_pos()
         if not self.rect().contains(cursor):
             return
         center = self.shot.to_image_point(cursor + self.origin)

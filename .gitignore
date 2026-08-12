@@ -15,8 +15,12 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+*.spec
+
+docs/_preview/
 
 .idea/
 .vscode/
 Thumbs.db
+desktop.ini
 .DS_Store
