@@ -32,3 +32,4 @@ jobs:
           python test_annotate.py
           python test_history.py
           python test_hotkeys.py
+          python test_autostart.py

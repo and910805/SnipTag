@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
-from . import hotkeys
+from . import autostart, hotkeys
 from .naming import Namer
 
 MODIFIER_KEYS = (Qt.Key_Control, Qt.Key_Shift, Qt.Key_Alt, Qt.Key_Meta,
@@ -147,6 +147,17 @@ class SettingsDialog(QDialog):
         self.notify_check.setChecked(bool(config["notify_on_save"]))
         form.addRow("", self.notify_check)
 
+        self.autostart_check = QCheckBox("開機時自動啟動（常駐系統匣）", self)
+        self.autostart_check.setChecked(autostart.is_enabled())
+        if autostart.available():
+            self.autostart_check.setToolTip(
+                "寫入目前使用者的登錄檔啟動項，不需要系統管理員權限。\n"
+                f"執行的命令：{autostart.launch_command()}")
+        else:
+            self.autostart_check.setEnabled(False)
+            self.autostart_check.setToolTip("這個功能只支援 Windows。")
+        form.addRow("", self.autostart_check)
+
         self.hk_capture = HotkeyEdit(config["hotkey_capture"], self)
         self.hk_quick = HotkeyEdit(config["hotkey_quickshot"], self)
         self.hk_pin = HotkeyEdit(config["hotkey_pin"], self)
@@ -177,6 +188,13 @@ class SettingsDialog(QDialog):
         )
         if chosen:
             self.dir_edit.setText(chosen)
+
+    def apply_autostart(self) -> bool | None:
+        """回傳 None 表示沒有變動，否則回傳是否設定成功。"""
+        wanted = self.autostart_check.isChecked()
+        if not autostart.available() or wanted == autostart.is_enabled():
+            return None
+        return autostart.sync(wanted)
 
     def apply_to_config(self) -> None:
         self.cfg["save_dir"] = self.dir_edit.text().strip() or self.cfg["save_dir"]

@@ -287,6 +287,11 @@ class SnipTagApp(QObject):
             accepted = dialog.exec() == SettingsDialog.Accepted
             if accepted:
                 dialog.apply_to_config()
+                changed = dialog.apply_autostart()
+                if changed is False:
+                    self.notify("無法設定開機啟動",
+                                "寫入登錄檔失敗，可能被群組原則鎖住。",
+                                QSystemTrayIcon.Warning)
                 self.menu = self._build_menu()
                 self.tray.setContextMenu(self.menu)
                 self._refresh_tooltip()
