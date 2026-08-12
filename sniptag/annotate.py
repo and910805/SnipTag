@@ -1,7 +1,9 @@
-"""標註圖形：矩形、橢圓、箭頭、直線、畫筆、螢光筆、馬賽克、文字。
+"""標註圖形：矩形、橢圓、箭頭、直線、畫筆、螢光筆、馬賽克、文字、序號。
 
 所有圖形都以「框選介面的座標」記錄，實際輸出時再由呼叫端縮放到原生解析度，
 所以標註在高 DPI 螢幕上也是向量般銳利，不會跟著截圖一起被放大。
+
+每個圖形都提供 bounds / hit / translate，讓畫完之後還能點選、搬移、刪除。
 """
 from __future__ import annotations
 
@@ -17,12 +19,30 @@ PALETTE = ["#f5423f", "#ff9f1c", "#2ecc71", "#2d7ff9", "#ffffff", "#1b2330"]
 WIDTHS = (("細", 2), ("中", 4), ("粗", 7))
 MOSAIC_BLOCK = 12
 TEXT_FONT = "Microsoft JhengHei UI"
+HIT_SLACK = 6
+
+
+def _distance_to_segment(point: QPoint, start: QPoint, end: QPoint) -> float:
+    dx, dy = end.x() - start.x(), end.y() - start.y()
+    if dx == 0 and dy == 0:
+        return math.hypot(point.x() - start.x(), point.y() - start.y())
+    t = ((point.x() - start.x()) * dx + (point.y() - start.y()) * dy) / (dx * dx + dy * dy)
+    t = max(0.0, min(1.0, t))
+    return math.hypot(point.x() - (start.x() + t * dx),
+                      point.y() - (start.y() + t * dy))
+
+
+def _near_outline(point: QPoint, rect: QRect, slack: int) -> bool:
+    outer = rect.adjusted(-slack, -slack, slack, slack)
+    inner = rect.adjusted(slack, slack, -slack, -slack)
+    return outer.contains(point) and not inner.contains(point)
 
 
 @dataclass
 class Style:
     color: str = PALETTE[0]
     width: int = 4
+    filled: bool = False
 
     def pen(self, cap=Qt.RoundCap) -> QPen:
         pen = QPen(QColor(self.color), self.width)
@@ -31,7 +51,7 @@ class Style:
         return pen
 
     def copy(self) -> "Style":
-        return Style(self.color, self.width)
+        return Style(self.color, self.width, self.filled)
 
 
 class Context:
@@ -41,9 +61,9 @@ class Context:
         raise NotImplementedError
 
 
-# --- 圖形 ---------------------------------------------------------
+# --- 兩點式圖形 ---------------------------------------------------
 @dataclass
-class RectShape:
+class _TwoPoint:
     start: QPoint
     end: QPoint
     style: Style
@@ -52,42 +72,58 @@ class RectShape:
     def rect(self) -> QRect:
         return QRect(self.start, self.end).normalized()
 
+    def bounds(self) -> QRect:
+        slack = self.style.width + HIT_SLACK
+        return self.rect.adjusted(-slack, -slack, slack, slack)
+
+    def translate(self, delta: QPoint) -> None:
+        self.start += delta
+        self.end += delta
+
+
+class RectShape(_TwoPoint):
     def draw(self, painter: QPainter, _ctx: Context) -> None:
         painter.setPen(self.style.pen(Qt.SquareCap))
-        painter.setBrush(Qt.NoBrush)
+        painter.setBrush(QColor(self.style.color) if self.style.filled else Qt.NoBrush)
         painter.drawRect(self.rect)
 
+    def hit(self, point: QPoint) -> bool:
+        if self.style.filled:
+            return self.bounds().contains(point)
+        return _near_outline(point, self.rect, self.style.width + HIT_SLACK)
 
-@dataclass
-class EllipseShape:
-    start: QPoint
-    end: QPoint
-    style: Style
 
+class EllipseShape(_TwoPoint):
     def draw(self, painter: QPainter, _ctx: Context) -> None:
         painter.setPen(self.style.pen(Qt.SquareCap))
-        painter.setBrush(Qt.NoBrush)
-        painter.drawEllipse(QRect(self.start, self.end).normalized())
+        painter.setBrush(QColor(self.style.color) if self.style.filled else Qt.NoBrush)
+        painter.drawEllipse(self.rect)
+
+    def hit(self, point: QPoint) -> bool:
+        rect = self.rect
+        if rect.width() < 2 or rect.height() < 2:
+            return False
+        # 以橢圓方程式判斷，落在環帶上就算命中
+        nx = (point.x() - rect.center().x()) / (rect.width() / 2)
+        ny = (point.y() - rect.center().y()) / (rect.height() / 2)
+        value = nx * nx + ny * ny
+        if self.style.filled:
+            return value <= 1.25
+        return 0.6 <= value <= 1.5
 
 
-@dataclass
-class LineShape:
-    start: QPoint
-    end: QPoint
-    style: Style
-
+class LineShape(_TwoPoint):
     def draw(self, painter: QPainter, _ctx: Context) -> None:
         painter.setPen(self.style.pen())
         painter.setBrush(Qt.NoBrush)
         painter.drawLine(self.start, self.end)
 
+    def hit(self, point: QPoint) -> bool:
+        return _distance_to_segment(point, self.start, self.end) <= (
+            self.style.width + HIT_SLACK)
 
-@dataclass
-class ArrowShape:
-    start: QPoint
-    end: QPoint
-    style: Style
 
+class ArrowShape(_TwoPoint):
     def draw(self, painter: QPainter, _ctx: Context) -> None:
         dx = self.end.x() - self.start.x()
         dy = self.end.y() - self.start.y()
@@ -104,62 +140,20 @@ class ArrowShape:
         painter.drawLine(QPointF(self.start), shaft_end)
 
         spread = math.radians(24)
-        tip = QPointF(self.end)
         left = QPointF(self.end.x() - math.cos(angle - spread) * head,
                        self.end.y() - math.sin(angle - spread) * head)
         right = QPointF(self.end.x() - math.cos(angle + spread) * head,
                         self.end.y() - math.sin(angle + spread) * head)
         painter.setPen(Qt.NoPen)
         painter.setBrush(QColor(self.style.color))
-        painter.drawPolygon(QPolygonF([tip, left, right]))
+        painter.drawPolygon(QPolygonF([QPointF(self.end), left, right]))
+
+    def hit(self, point: QPoint) -> bool:
+        return _distance_to_segment(point, self.start, self.end) <= (
+            self.style.width + HIT_SLACK)
 
 
-@dataclass
-class PenShape:
-    points: list[QPoint]
-    style: Style
-
-    def draw(self, painter: QPainter, _ctx: Context) -> None:
-        if len(self.points) < 2:
-            return
-        painter.setPen(self.style.pen())
-        painter.setBrush(Qt.NoBrush)
-        painter.drawPolyline(QPolygonF([QPointF(p) for p in self.points]))
-
-
-@dataclass
-class MarkerShape:
-    """螢光筆：半透明、加寬，用相乘混色讓底下文字還看得見。"""
-
-    points: list[QPoint]
-    style: Style
-
-    def draw(self, painter: QPainter, _ctx: Context) -> None:
-        if len(self.points) < 2:
-            return
-        color = QColor(self.style.color)
-        color.setAlpha(110)
-        pen = QPen(color, self.style.width * 3.5)
-        pen.setCapStyle(Qt.FlatCap)
-        pen.setJoinStyle(Qt.RoundJoin)
-        painter.save()
-        painter.setCompositionMode(QPainter.CompositionMode_Multiply)
-        painter.setPen(pen)
-        painter.setBrush(Qt.NoBrush)
-        painter.drawPolyline(QPolygonF([QPointF(p) for p in self.points]))
-        painter.restore()
-
-
-@dataclass
-class MosaicShape:
-    start: QPoint
-    end: QPoint
-    style: Style
-
-    @property
-    def rect(self) -> QRect:
-        return QRect(self.start, self.end).normalized()
-
+class MosaicShape(_TwoPoint):
     def draw(self, painter: QPainter, ctx: Context) -> None:
         rect = self.rect
         if rect.width() < 2 or rect.height() < 2:
@@ -176,7 +170,72 @@ class MosaicShape:
         painter.drawImage(rect, small)
         painter.restore()
 
+    def hit(self, point: QPoint) -> bool:
+        return self.rect.contains(point)
 
+
+# --- 筆畫式圖形 ---------------------------------------------------
+@dataclass
+class _Stroke:
+    points: list[QPoint]
+    style: Style
+
+    def bounds(self) -> QRect:
+        if not self.points:
+            return QRect()
+        xs = [p.x() for p in self.points]
+        ys = [p.y() for p in self.points]
+        slack = self.style.width + HIT_SLACK
+        return QRect(QPoint(min(xs), min(ys)), QPoint(max(xs), max(ys))).adjusted(
+            -slack, -slack, slack, slack)
+
+    def translate(self, delta: QPoint) -> None:
+        self.points = [p + delta for p in self.points]
+
+    def hit(self, point: QPoint) -> bool:
+        tolerance = self.style.width + HIT_SLACK
+        return any(
+            _distance_to_segment(point, self.points[i], self.points[i + 1]) <= tolerance
+            for i in range(len(self.points) - 1)
+        )
+
+
+class PenShape(_Stroke):
+    def draw(self, painter: QPainter, _ctx: Context) -> None:
+        if len(self.points) < 2:
+            return
+        painter.setPen(self.style.pen())
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPolyline(QPolygonF([QPointF(p) for p in self.points]))
+
+
+class MarkerShape(_Stroke):
+    """螢光筆：半透明、加寬，用相乘混色讓底下文字還看得見。"""
+
+    def draw(self, painter: QPainter, _ctx: Context) -> None:
+        if len(self.points) < 2:
+            return
+        color = QColor(self.style.color)
+        color.setAlpha(110)
+        pen = QPen(color, self.style.width * 3.5)
+        pen.setCapStyle(Qt.FlatCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        painter.save()
+        painter.setCompositionMode(QPainter.CompositionMode_Multiply)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPolyline(QPolygonF([QPointF(p) for p in self.points]))
+        painter.restore()
+
+    def hit(self, point: QPoint) -> bool:
+        tolerance = self.style.width * 2 + HIT_SLACK
+        return any(
+            _distance_to_segment(point, self.points[i], self.points[i + 1]) <= tolerance
+            for i in range(len(self.points) - 1)
+        )
+
+
+# --- 單點式圖形 ---------------------------------------------------
 @dataclass
 class TextShape:
     pos: QPoint
@@ -188,20 +247,61 @@ class TextShape:
         font.setPointSize(8 + self.style.width * 2)
         return font
 
+    def bounds(self) -> QRect:
+        metrics = QFontMetrics(self.font())
+        return QRect(self.pos, QSize(metrics.horizontalAdvance(self.text) + 8,
+                                     metrics.height() + 4))
+
+    def translate(self, delta: QPoint) -> None:
+        self.pos += delta
+
+    def hit(self, point: QPoint) -> bool:
+        return self.bounds().adjusted(-4, -4, 4, 4).contains(point)
+
     def draw(self, painter: QPainter, _ctx: Context) -> None:
         if not self.text:
             return
-        font = self.font()
-        metrics = QFontMetrics(font)
-        painter.setFont(font)
+        painter.setFont(self.font())
         painter.setPen(QColor(self.style.color))
-        painter.drawText(
-            QRect(self.pos, QSize(metrics.horizontalAdvance(self.text) + 8,
-                                  metrics.height() + 4)),
-            Qt.AlignLeft | Qt.AlignTop, self.text,
-        )
+        painter.drawText(self.bounds(), Qt.AlignLeft | Qt.AlignTop, self.text)
 
 
+@dataclass
+class NumberShape:
+    """序號標記：一個實心圓加上白色數字，點一下就自動遞增。"""
+
+    pos: QPoint
+    number: int
+    style: Style
+
+    def radius(self) -> int:
+        return 9 + self.style.width * 2
+
+    def bounds(self) -> QRect:
+        r = self.radius()
+        return QRect(self.pos.x() - r, self.pos.y() - r, r * 2, r * 2)
+
+    def translate(self, delta: QPoint) -> None:
+        self.pos += delta
+
+    def hit(self, point: QPoint) -> bool:
+        return (math.hypot(point.x() - self.pos.x(), point.y() - self.pos.y())
+                <= self.radius() + 4)
+
+    def draw(self, painter: QPainter, _ctx: Context) -> None:
+        bounds = self.bounds()
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(self.style.color))
+        painter.drawEllipse(bounds)
+        font = QFont(TEXT_FONT)
+        font.setPointSize(max(7, self.radius()))
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(QColor("#ffffff"))
+        painter.drawText(bounds, Qt.AlignCenter, str(self.number))
+
+
+# --- 工具對照表 ---------------------------------------------------
 DRAG_TOOLS = {
     "rect": RectShape,
     "ellipse": EllipseShape,
@@ -210,6 +310,7 @@ DRAG_TOOLS = {
     "mosaic": MosaicShape,
 }
 STROKE_TOOLS = {"pen": PenShape, "marker": MarkerShape}
+CLICK_TOOLS = ("text", "number")
 
 TOOL_LABELS = (
     ("rect", "矩形", "R"),
@@ -220,7 +321,10 @@ TOOL_LABELS = (
     ("marker", "螢光", "H"),
     ("mosaic", "馬賽克", "M"),
     ("text", "文字", "T"),
+    ("number", "序號", "N"),
 )
+
+FILLABLE = ("rect", "ellipse")
 
 
 # --- 圖層 ---------------------------------------------------------
@@ -235,6 +339,12 @@ class Layer:
     def add(self, shape) -> None:
         self.shapes.append(shape)
         self._undone.clear()
+
+    def remove(self, shape) -> bool:
+        if shape in self.shapes:
+            self.shapes.remove(shape)
+            return True
+        return False
 
     def undo(self) -> bool:
         if not self.shapes:
@@ -255,6 +365,17 @@ class Layer:
         self.shapes.clear()
         return True
 
+    def shape_at(self, point: QPoint):
+        """由上而下找出第一個被點到的圖形。"""
+        for shape in reversed(self.shapes):
+            if shape.hit(point):
+                return shape
+        return None
+
+    def next_number(self) -> int:
+        used = [s.number for s in self.shapes if isinstance(s, NumberShape)]
+        return max(used) + 1 if used else 1
+
     def draw(self, painter: QPainter, ctx: Context, preview=None) -> None:
         for shape in self.shapes:
             shape.draw(painter, ctx)
@@ -269,3 +390,17 @@ def make_shape(tool: str, start: QPoint, end: QPoint, style: Style):
     if tool in STROKE_TOOLS:
         return STROKE_TOOLS[tool]([start, end], style.copy())
     return None
+
+
+# --- 色彩格式 -----------------------------------------------------
+COLOR_FORMATS = ("HEX", "RGB", "HSL")
+
+
+def format_color(color: QColor, fmt: str) -> str:
+    if fmt == "RGB":
+        return f"rgb({color.red()}, {color.green()}, {color.blue()})"
+    if fmt == "HSL":
+        return (f"hsl({max(0, color.hslHue())}, "
+                f"{round(color.hslSaturationF() * 100)}%, "
+                f"{round(color.lightnessF() * 100)}%)")
+    return color.name().upper()

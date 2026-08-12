@@ -20,6 +20,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from sniptag import annotate  # noqa: E402
 from sniptag.config import DEFAULTS  # noqa: E402
 from sniptag.dialogs import SettingsDialog, TopicDialog  # noqa: E402
+from sniptag.history import History, HistoryDialog  # noqa: E402
 from sniptag.overlay import Overlay  # noqa: E402
 from sniptag.pinwindow import PinWindow  # noqa: E402
 from sniptag.screens import DesktopShot, Monitor  # noqa: E402
@@ -207,6 +208,16 @@ def build_desktop() -> QImage:
     return image
 
 
+class _NullApp:
+    """截圖時 HistoryDialog 不需要真的做事。"""
+
+    def pin_centered(self, _pixmap): pass
+
+    def save_pixmap(self, _pixmap, record=True): return None
+
+    def copy_to_clipboard(self, _pixmap): pass
+
+
 class DemoOverlay(Overlay):
     """把游標位置固定下來，讓放大鏡出現在指定的地方。"""
 
@@ -301,8 +312,11 @@ def main() -> None:
         [QPoint(126, 256), QPoint(300, 256)], annotate.Style("#ff9f1c", 5)))
     overlay.layer.add(annotate.MosaicShape(QPoint(126, 290), QPoint(300, 312),
                                            annotate.Style()))
-    overlay.layer.add(annotate.TextShape(QPoint(196, 496), "這段是重點", red))
+    overlay.layer.add(annotate.TextShape(QPoint(232, 492), "這段是重點", red))
     overlay.layer.add(annotate.EllipseShape(QPoint(520, 330), QPoint(700, 372), blue))
+    overlay.layer.add(annotate.NumberShape(QPoint(110, 256), 1, blue))
+    overlay.layer.add(annotate.NumberShape(QPoint(110, 302), 2, blue))
+    overlay.layer.add(annotate.NumberShape(QPoint(508, 348), 3, blue))
     overlay.style = red
     overlay.tool = "rect"
     overlay._show_toolbar()
@@ -360,6 +374,18 @@ def main() -> None:
     settings = SettingsDialog(demo_config)
     save_raw(panel(grab_dialog(settings)), "settings.png")
     settings.close()
+
+    # 7. 截圖歷史
+    history = History()
+    for index, region in enumerate((
+        QRect(88, 186, 390, 340), QRect(500, 186, 390, 340),
+        QRect(72, 96, 816, 90), QRect(952, 78, 440, 366),
+    )):
+        piece = shot.crop(region)
+        history.add(piece, f"MDASH_{index + 1:02d}.png" if index < 3 else "")
+    history_dialog = HistoryDialog(history, _NullApp())
+    save_raw(panel(grab_dialog(history_dialog)), "history.png")
+    history_dialog.close()
 
     for leftover in (OUT / "_preview").glob("*.png"):
         leftover.unlink()

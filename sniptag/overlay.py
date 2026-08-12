@@ -1,4 +1,4 @@
-"""全螢幕框選介面：暗化背景、拖曳選取、視窗自動偵測、放大鏡、標註、動作工具列。
+"""全螢幕框選介面：暗化背景、拖曳選取、輔助框、放大鏡、標註、動作工具列。
 
 所有換算都交給 DesktopShot 逐螢幕處理，因此混合 DPI（筆電 + 外接螢幕）
 不需要任何設定，接上就對。
@@ -7,10 +7,12 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPoint, QRect, QSize, Qt, Signal
 from PySide6.QtGui import (
-    QColor, QCursor, QFont, QFontMetrics, QImage, QPainter, QPen, QPixmap, QRegion,
+    QColor, QCursor, QFont, QFontMetrics, QGuiApplication, QImage, QPainter, QPen,
+    QPixmap, QRegion,
 )
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget,
+    QColorDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout,
+    QWidget,
 )
 
 from . import annotate, winrects
@@ -22,19 +24,19 @@ HANDLE_SIZE = 8
 MIN_SELECTION = 3
 MAG_BOX = 132          # 放大鏡邊長（邏輯像素）
 MAG_SRC_PX = 22        # 放大鏡取樣的原始像素數
+NUDGE = 1
+NUDGE_FAST = 10
 
 TOOLBAR_QSS = """
 QWidget#toolbar { background: #23262b; border: 1px solid #3a3f47; border-radius: 6px; }
 QPushButton {
     background: #2f343b; color: #e8eaed; border: none; border-radius: 4px;
-    padding: 5px 10px; font-size: 12px;
+    padding: 4px 7px; font-size: 12px;
 }
 QPushButton:hover { background: #3d434c; }
 QPushButton:checked { background: #2d7ff9; color: white; }
 QPushButton#primary { background: #2d7ff9; color: white; font-weight: bold; }
 QPushButton#primary:hover { background: #4a92fb; }
-QPushButton#swatch { border: 2px solid #23262b; border-radius: 9px; padding: 0; }
-QPushButton#swatch:checked { border: 2px solid #e8eaed; }
 QLabel#name { color: #9fd18a; font-size: 12px; padding: 0 6px; }
 QFrame#sep { background: #3a3f47; }
 QLineEdit#inline {
@@ -65,7 +67,6 @@ class Toolbar(QWidget):
         outer.setContentsMargins(8, 6, 8, 6)
         outer.setSpacing(6)
 
-        # --- 上排：標註工具 ---
         tools = QHBoxLayout()
         tools.setSpacing(4)
         self.tool_buttons: dict[str, QPushButton] = {}
@@ -75,18 +76,17 @@ class Toolbar(QWidget):
             self.tool_buttons[key] = button
         tools.addWidget(_separator())
 
+        self.fill_button = self._button("填滿", checkable=True)
+        tools.addWidget(self.fill_button)
+        tools.addWidget(_separator())
+
         self.color_buttons: dict[str, QPushButton] = {}
         for color in annotate.PALETTE:
-            button = self._button("", checkable=True)
-            button.setObjectName("swatch")
-            button.setFixedSize(18, 18)
-            button.setStyleSheet(
-                f"QPushButton#swatch {{ background: {color};"
-                f" border: 2px solid #23262b; border-radius: 9px; }}"
-                f"QPushButton#swatch:checked {{ border: 2px solid #e8eaed; }}"
-            )
-            tools.addWidget(button)
-            self.color_buttons[color] = button
+            tools.addWidget(self._swatch(color))
+        self.custom_button = self._button("＋")
+        self.custom_button.setFixedSize(20, 18)
+        self.custom_button.setToolTip("自訂顏色")
+        tools.addWidget(self.custom_button)
         tools.addWidget(_separator())
 
         self.width_buttons: dict[int, QPushButton] = {}
@@ -96,14 +96,15 @@ class Toolbar(QWidget):
             self.width_buttons[value] = button
         tools.addWidget(_separator())
 
-        self.undo_button = self._button("復原 Ctrl+Z")
+        self.undo_button = self._button("復原")
+        self.undo_button.setToolTip("復原 Ctrl+Z　／　重做 Ctrl+Shift+Z")
         self.clear_button = self._button("清除")
+        self.clear_button.setToolTip("清除所有標註")
         tools.addWidget(self.undo_button)
         tools.addWidget(self.clear_button)
         tools.addStretch(1)
         outer.addLayout(tools)
 
-        # --- 下排：輸出動作 ---
         actions = QHBoxLayout()
         actions.setSpacing(6)
         self.name_label = QLabel(self)
@@ -134,6 +135,17 @@ class Toolbar(QWidget):
         button.setCheckable(checkable)
         return button
 
+    def _swatch(self, color: str) -> QPushButton:
+        button = self._button("", checkable=True)
+        button.setFixedSize(18, 18)
+        button.setStyleSheet(
+            f"QPushButton {{ background: {color}; border: 2px solid #23262b;"
+            f" border-radius: 9px; padding: 0; }}"
+            f"QPushButton:checked {{ border: 2px solid #e8eaed; }}"
+        )
+        self.color_buttons[color] = button
+        return button
+
     def set_name(self, name: str) -> None:
         self.name_label.setText(f"→ {name}")
         self.adjustSize()
@@ -145,6 +157,8 @@ class Toolbar(QWidget):
             button.setChecked(color.lower() == style.color.lower())
         for value, button in self.width_buttons.items():
             button.setChecked(value == style.width)
+        self.fill_button.setChecked(style.filled)
+        self.fill_button.setEnabled(tool in annotate.FILLABLE)
 
 
 class _ShotContext(annotate.Context):
@@ -184,17 +198,19 @@ class Overlay(QWidget):
         self.selection = QRect()
         self.anchor = QPoint()
         self.press_pos = QPoint()
-        self.mode: str | None = None      # drag / move / resize / annotate
+        self.mode: str | None = None   # drag / move / resize / annotate / shape
         self.resize_handle: str | None = None
         self.settled = False
         self._emitted = False
 
-        # 標註
         self.layer = annotate.Layer()
         self.style = annotate.Style()
         self.tool: str | None = None
-        self.pending = None               # 正在拖曳中的圖形
+        self.pending = None            # 正在拖曳中的圖形
+        self.selected_shape = None     # 已完成、被點選中的圖形
         self.text_edit: QLineEdit | None = None
+        self.color_format = annotate.COLOR_FORMATS[0]
+        self.flash = ""                # 短暫提示訊息（例如已複製色碼）
 
         self.setGeometry(shot.logical_geometry)
         self.window_groups = self._logical_window_groups()
@@ -216,6 +232,8 @@ class Overlay(QWidget):
             button.clicked.connect(lambda _=False, value=color: self.set_color(value))
         for width, button in self.toolbar.width_buttons.items():
             button.clicked.connect(lambda _=False, value=width: self.set_width(value))
+        self.toolbar.fill_button.clicked.connect(self.toggle_fill)
+        self.toolbar.custom_button.clicked.connect(self.pick_custom_color)
         self.toolbar.undo_button.clicked.connect(self.undo)
         self.toolbar.clear_button.clicked.connect(self.clear_annotations)
 
@@ -249,22 +267,44 @@ class Overlay(QWidget):
 
     # --- 標註設定 -------------------------------------------------
     def set_tool(self, tool: str | None) -> None:
-        self.tool = None if tool == self.tool else tool
         self._commit_text()
+        self.tool = None if tool == self.tool else tool
+        self.selected_shape = None
         self.toolbar.sync(self.tool, self.style)
         self.setCursor(Qt.CrossCursor if self.tool else Qt.ArrowCursor)
         self.update()
 
     def set_color(self, color: str) -> None:
         self.style.color = color
+        self._apply_to_selected(lambda s: setattr(s.style, "color", color))
         self.toolbar.sync(self.tool, self.style)
+        self.update()
 
     def set_width(self, width: int) -> None:
         self.style.width = width
+        self._apply_to_selected(lambda s: setattr(s.style, "width", width))
         self.toolbar.sync(self.tool, self.style)
+        self.update()
+
+    def toggle_fill(self) -> None:
+        self.style.filled = not self.style.filled
+        self._apply_to_selected(
+            lambda s: setattr(s.style, "filled", self.style.filled))
+        self.toolbar.sync(self.tool, self.style)
+        self.update()
+
+    def pick_custom_color(self) -> None:
+        chosen = QColorDialog.getColor(QColor(self.style.color), self, "選擇顏色")
+        if chosen.isValid():
+            self.set_color(chosen.name())
+
+    def _apply_to_selected(self, action) -> None:
+        if self.selected_shape is not None:
+            action(self.selected_shape)
 
     def undo(self) -> None:
         if self.layer.undo():
+            self.selected_shape = None
             self.update()
 
     def redo(self) -> None:
@@ -273,7 +313,27 @@ class Overlay(QWidget):
 
     def clear_annotations(self) -> None:
         if self.layer.clear():
+            self.selected_shape = None
             self.update()
+
+    def delete_selected(self) -> None:
+        if self.selected_shape is not None and self.layer.remove(self.selected_shape):
+            self.selected_shape = None
+            self.update()
+
+    # --- 取色 -----------------------------------------------------
+    def copy_color(self) -> None:
+        color = self.shot.color_at(self._cursor_pos() + self.origin)
+        text = annotate.format_color(color, self.color_format)
+        QGuiApplication.clipboard().setText(text)
+        self.flash = f"已複製 {text}"
+        self.update()
+
+    def cycle_color_format(self) -> None:
+        formats = annotate.COLOR_FORMATS
+        index = formats.index(self.color_format)
+        self.color_format = formats[(index + 1) % len(formats)]
+        self.update()
 
     # --- 繪製 -----------------------------------------------------
     def paintEvent(self, _event) -> None:
@@ -296,6 +356,7 @@ class Overlay(QWidget):
             painter.setRenderHint(QPainter.Antialiasing, True)
             self.layer.draw(painter, self.context, self.pending)
             painter.restore()
+            self._paint_selected_marker(painter)
             self._paint_selection(painter, selection)
         elif self.hover_rect is not None:
             painter.setPen(QPen(ACCENT, 2, Qt.DashLine))
@@ -305,6 +366,15 @@ class Overlay(QWidget):
 
         if not self.settled:
             self._paint_magnifier(painter)
+
+    def _paint_selected_marker(self, painter: QPainter) -> None:
+        if self.selected_shape is None:
+            return
+        painter.setRenderHint(QPainter.Antialiasing, False)
+        pen = QPen(QColor(255, 255, 255, 200), 1, Qt.DashLine)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(self.selected_shape.bounds())
 
     def _paint_selection(self, painter: QPainter, selection: QRect) -> None:
         painter.setRenderHint(QPainter.Antialiasing, False)
@@ -318,15 +388,16 @@ class Overlay(QWidget):
             for rect in self._handles(selection).values():
                 painter.drawRect(rect)
 
-        # 尺寸標籤顯示實際會存下來的像素數
         dpr = self.shot.dpr_for(self._to_global(selection))
         width = round(selection.width() * dpr)
         height = round(selection.height() * dpr)
-        self._draw_label(painter, f"{width} × {height}",
-                         selection.topLeft() + QPoint(0, -26))
+        text = f"{width} × {height}"
+        if self.flash:
+            text = f"{text}　{self.flash}"
+        self._draw_label(painter, text, selection.topLeft() + QPoint(0, -26))
 
     def _paint_hint(self, painter: QPainter) -> None:
-        text = "拖曳框選　點擊選取視窗　Ctrl+A 全螢幕　Esc 取消"
+        text = "拖曳框選　點擊選取視窗　方向鍵微調　C 複製色碼　Ctrl+A 全螢幕　Esc 取消"
         metrics = QFontMetrics(self._label_font())
         position = QPoint(
             self.rect().center().x() - metrics.horizontalAdvance(text) // 2,
@@ -366,7 +437,7 @@ class Overlay(QWidget):
         half = MAG_SRC_PX // 2
         source = QRect(center.x() - half, center.y() - half, MAG_SRC_PX, MAG_SRC_PX)
 
-        box = QRect(cursor + QPoint(18, 18), QSize(MAG_BOX, MAG_BOX + 34))
+        box = QRect(cursor + QPoint(18, 18), QSize(MAG_BOX, MAG_BOX + 48))
         if box.right() > self.rect().right():
             box.moveLeft(cursor.x() - 18 - box.width())
         if box.bottom() > self.rect().bottom():
@@ -387,10 +458,16 @@ class Overlay(QWidget):
 
         global_pos = cursor + self.origin
         color = self.shot.color_at(global_pos)
-        info = f"({global_pos.x()}, {global_pos.y()})\n{color.name().upper()}"
+        swatch = QRect(box.x() + 6, view.bottom() + 6, 12, 12)
+        painter.setPen(QPen(QColor(120, 126, 138), 1))
+        painter.setBrush(color)
+        painter.drawRect(swatch)
+        info = (f"({global_pos.x()}, {global_pos.y()})\n"
+                f"{annotate.format_color(color, self.color_format)}　"
+                f"C 複製 · Shift 換格式")
         painter.setPen(QColor(226, 230, 236))
         painter.setFont(self._label_font())
-        painter.drawText(QRect(box.x() + 6, view.bottom() + 2, MAG_BOX - 12, 32),
+        painter.drawText(QRect(box.x() + 22, view.bottom() + 2, MAG_BOX - 26, 44),
                          Qt.AlignLeft | Qt.AlignVCenter, info)
 
     # --- 選取控制 -------------------------------------------------
@@ -432,6 +509,7 @@ class Overlay(QWidget):
             return
         pos = event.position().toPoint()
         self.press_pos = pos
+        self.flash = ""
         self._commit_text()
 
         handle = self._handle_at(pos)
@@ -439,10 +517,19 @@ class Overlay(QWidget):
             self.mode, self.resize_handle = "resize", handle
         elif self.settled and self.tool and self.selection.contains(pos):
             self._begin_annotation(pos)
-        elif self.settled and self.selection.normalized().contains(pos):
-            self.mode = "move"
-            self.anchor = pos - self.selection.normalized().topLeft()
+        elif self.settled and self.selection.contains(pos):
+            shape = self.layer.shape_at(pos)
+            if shape is not None:
+                self.selected_shape = shape
+                self.mode = "shape"
+                self.anchor = pos
+                self.toolbar.sync(self.tool, shape.style)
+            else:
+                self.selected_shape = None
+                self.mode = "move"
+                self.anchor = pos - self.selection.normalized().topLeft()
         else:
+            self.selected_shape = None
             self.mode = "drag"
             self.settled = False
             self.anchor = pos
@@ -454,6 +541,11 @@ class Overlay(QWidget):
         if self.tool == "text":
             self._open_text_editor(pos)
             return
+        if self.tool == "number":
+            self.layer.add(annotate.NumberShape(pos, self.layer.next_number(),
+                                                self.style.copy()))
+            self.update()
+            return
         self.mode = "annotate"
         self.pending = annotate.make_shape(self.tool, pos, pos, self.style)
 
@@ -461,20 +553,14 @@ class Overlay(QWidget):
         pos = event.position().toPoint()
         if self.mode == "annotate":
             self._extend_annotation(pos)
+        elif self.mode == "shape":
+            if self.selected_shape is not None:
+                self.selected_shape.translate(pos - self.anchor)
+                self.anchor = pos
         elif self.mode == "drag":
             self.selection = QRect(self.anchor, pos).normalized()
         elif self.mode == "move":
-            selection = self.selection.normalized()
-            selection.moveTopLeft(pos - self.anchor)
-            bounds = self.rect()
-            selection.moveLeft(max(bounds.left(),
-                                   min(selection.left(),
-                                       bounds.right() - selection.width())))
-            selection.moveTop(max(bounds.top(),
-                                  min(selection.top(),
-                                      bounds.bottom() - selection.height())))
-            self.selection = selection
-            self._place_toolbar()
+            self._move_selection_to(pos - self.anchor)
         elif self.mode == "resize":
             self._resize_to(pos)
             self._place_toolbar()
@@ -483,6 +569,19 @@ class Overlay(QWidget):
                 self._update_hover(pos)
             self.setCursor(self._cursor_for(pos))
         self.update()
+
+    def _move_selection_to(self, top_left: QPoint) -> None:
+        selection = self.selection.normalized()
+        selection.moveTopLeft(top_left)
+        bounds = self.rect()
+        selection.moveLeft(max(bounds.left(),
+                               min(selection.left(),
+                                   bounds.right() - selection.width())))
+        selection.moveTop(max(bounds.top(),
+                              min(selection.top(),
+                                  bounds.bottom() - selection.height())))
+        self.selection = selection
+        self._place_toolbar()
 
     def _extend_annotation(self, pos: QPoint) -> None:
         if self.pending is None:
@@ -504,7 +603,11 @@ class Overlay(QWidget):
         if self.settled and self.selection.normalized().contains(pos):
             if self.tool == "text":
                 return Qt.IBeamCursor
-            return Qt.CrossCursor if self.tool else Qt.SizeAllCursor
+            if self.tool:
+                return Qt.CrossCursor
+            if self.layer.shape_at(pos) is not None:
+                return Qt.OpenHandCursor
+            return Qt.SizeAllCursor
         return Qt.CrossCursor
 
     def _resize_to(self, pos: QPoint) -> None:
@@ -529,9 +632,12 @@ class Overlay(QWidget):
             self._finish_annotation()
             self.update()
             return
+        if self.mode == "shape":
+            self.mode = None
+            self.update()
+            return
 
         if self.mode == "drag" and (pos - self.press_pos).manhattanLength() < 6:
-            # 沒拖曳 = 選取游標底下的區塊
             self._update_hover(pos)
             self.selection = QRect(self.hover_rect) if self.hover_rect else QRect()
         self.mode = None
@@ -568,9 +674,10 @@ class Overlay(QWidget):
     def mouseDoubleClickEvent(self, event) -> None:
         if self.tool:
             return
-        if self.settled and self.selection.normalized().contains(
-            event.position().toPoint()
-        ):
+        pos = event.position().toPoint()
+        if self.settled and self.layer.shape_at(pos) is not None:
+            return
+        if self.settled and self.selection.normalized().contains(pos):
             self._emit("save")
 
     # --- 文字工具 -------------------------------------------------
@@ -609,7 +716,10 @@ class Overlay(QWidget):
         except Exception:
             self.toolbar.set_name("?")
         self.toolbar.sync(self.tool, self.style)
+        # 窄螢幕上不讓工具列超出畫面，寧可讓按鈕擠一點
+        self.toolbar.setMaximumWidth(max(320, self.width() - 16))
         self.toolbar.show()
+        self.toolbar.adjustSize()
         self.toolbar.raise_()
         self._place_toolbar()
 
@@ -631,20 +741,23 @@ class Overlay(QWidget):
     # --- 鍵盤 -----------------------------------------------------
     def keyPressEvent(self, event) -> None:
         key, mods = event.key(), event.modifiers()
+
         if key == Qt.Key_Escape:
-            if self.text_edit is not None:
-                editor, self.text_edit = self.text_edit, None
-                editor.deleteLater()
-                self.setFocus()
-                self.update()
-            elif self.tool:
-                self.set_tool(None)
-            else:
-                self.cancel()
+            self._handle_escape()
+            return
+        if key == Qt.Key_Shift:
+            self.cycle_color_format()
             return
         if key in (Qt.Key_Return, Qt.Key_Enter):
             self._emit("save")
             return
+        if key in (Qt.Key_Delete, Qt.Key_Backspace) and self.selected_shape is not None:
+            self.delete_selected()
+            return
+        if key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down):
+            self._handle_arrow(key, mods)
+            return
+
         if mods & Qt.ControlModifier:
             if key == Qt.Key_C:
                 self._emit("copy")
@@ -660,17 +773,66 @@ class Overlay(QWidget):
                 self._show_toolbar()
                 self.update()
             return
-        if self.settled and not mods:
+
+        if mods:
+            super().keyPressEvent(event)
+            return
+
+        if self.settled:
             for tool, _label, shortcut in annotate.TOOL_LABELS:
                 if key == getattr(Qt, f"Key_{shortcut}"):
                     self.set_tool(tool)
                     return
-        if key == Qt.Key_S and not mods:
+        if key == Qt.Key_C:
+            self.copy_color()
+        elif key == Qt.Key_S:
             self._emit("save")
-        elif key == Qt.Key_F and not mods:
+        elif key == Qt.Key_F:
             self._emit("pin")
         else:
             super().keyPressEvent(event)
+
+    def _handle_escape(self) -> None:
+        if self.text_edit is not None:
+            editor, self.text_edit = self.text_edit, None
+            editor.deleteLater()
+            self.setFocus()
+        elif self.selected_shape is not None:
+            self.selected_shape = None
+        elif self.tool:
+            self.set_tool(None)
+        else:
+            self.cancel()
+            return
+        self.update()
+
+    def _handle_arrow(self, key: int, mods) -> None:
+        step = NUDGE_FAST if mods & Qt.AltModifier else NUDGE
+        delta = {
+            Qt.Key_Left: QPoint(-step, 0), Qt.Key_Right: QPoint(step, 0),
+            Qt.Key_Up: QPoint(0, -step), Qt.Key_Down: QPoint(0, step),
+        }[key]
+
+        if self.selected_shape is not None:
+            self.selected_shape.translate(delta)
+        elif not self.settled:
+            # 還沒框好：讓游標逐像素移動，配合放大鏡對齊
+            QCursor.setPos(QCursor.pos() + delta)
+            if self.mode == "drag":
+                self.selection = QRect(self.anchor, self._cursor_pos()).normalized()
+        elif mods & Qt.ControlModifier:
+            self.selection = self.selection.normalized().adjusted(
+                0, 0, delta.x(), delta.y()).intersected(self.rect())
+            self._place_toolbar()
+        elif mods & Qt.ShiftModifier:
+            selection = self.selection.normalized().adjusted(
+                0, 0, -abs(delta.x()), -abs(delta.y()))
+            if selection.width() >= MIN_SELECTION and selection.height() >= MIN_SELECTION:
+                self.selection = selection
+                self._place_toolbar()
+        else:
+            self._move_selection_to(self.selection.normalized().topLeft() + delta)
+        self.update()
 
     # --- 收尾 -----------------------------------------------------
     def render_result(self) -> QPixmap:

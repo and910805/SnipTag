@@ -1,4 +1,4 @@
-"""SnipTag 主控制器：系統匣、熱鍵、截圖流程、存檔。"""
+"""SnipTag 主控制器：系統匣、熱鍵、截圖流程、存檔、歷史。"""
 from __future__ import annotations
 
 import os
@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QApplication, QFileDialog, QMenu, QMessageBox, QSy
 from . import screens
 from .config import Config
 from .dialogs import SettingsDialog, TopicDialog
+from .history import History, HistoryDialog
 from .hotkeys import HotkeyManager
 from .icon import app_icon
 from .naming import Namer
@@ -29,9 +30,10 @@ class SnipTagApp(QObject):
         self.icon = app_icon()
         self.overlay: Overlay | None = None
         self.pins: list[PinWindow] = []
+        self.history = History()
+        self.history_dialog: HistoryDialog | None = None
 
         self.tray = QSystemTrayIcon(self.icon, self)
-        # QSystemTrayIcon 不接管選單的所有權，必須自己留參考避免被回收
         self.menu = self._build_menu()
         self.tray.setContextMenu(self.menu)
         self.tray.activated.connect(self._on_tray_activated)
@@ -56,7 +58,10 @@ class SnipTagApp(QObject):
             (f"貼上為釘圖\t{self.cfg['hotkey_pin']}", self.paste_pin),
             None,
             (f"設定主題…\t{self.cfg['hotkey_topic']}", self.change_topic),
+            ("截圖歷史…", self.show_history),
             ("開啟存檔資料夾", self.open_folder),
+            None,
+            ("解除所有滑鼠穿透", self.clear_click_through),
             ("關閉所有釘圖", self.close_all_pins),
             None,
             ("設定…", self.open_settings),
@@ -132,13 +137,17 @@ class SnipTagApp(QObject):
         self.overlay = None
         if action == "save":
             self.save_pixmap(pixmap)
-        elif action == "saveas":
+            return
+        if action == "saveas":
             self.save_pixmap_as(pixmap)
-        elif action == "copy":
+            return
+        self.history.add(pixmap)
+        if action == "copy":
             self.copy_to_clipboard(pixmap)
             self.notify("已複製", "截圖已放進剪貼簿。")
         elif action == "pin":
             self.pin(pixmap, geometry.topLeft())
+        self._refresh_history_dialog()
 
     # --- 存檔 -----------------------------------------------------
     def _write(self, pixmap: QPixmap, path: Path) -> bool:
@@ -154,7 +163,7 @@ class SnipTagApp(QObject):
             painter.end()
         return image.save(str(path), fmt, quality)
 
-    def save_pixmap(self, pixmap: QPixmap) -> Path | None:
+    def save_pixmap(self, pixmap: QPixmap, record: bool = True) -> Path | None:
         try:
             path = self.namer.next_path()
         except OSError as exc:
@@ -163,6 +172,9 @@ class SnipTagApp(QObject):
         if not self._write(pixmap, path):
             self.notify("存檔失敗", f"寫入失敗：{path}", QSystemTrayIcon.Critical)
             return None
+        if record:
+            self.history.add(pixmap, path.name)
+            self._refresh_history_dialog()
         if self.cfg["copy_on_save"]:
             self.copy_to_clipboard(pixmap)
         if self.cfg["notify_on_save"]:
@@ -181,6 +193,8 @@ class SnipTagApp(QObject):
         if not self._write(pixmap, path):
             self.notify("存檔失敗", f"寫入失敗：{path}", QSystemTrayIcon.Critical)
             return None
+        self.history.add(pixmap, path.name)
+        self._refresh_history_dialog()
         self._refresh_tooltip()
         return path
 
@@ -195,13 +209,19 @@ class SnipTagApp(QObject):
         window.raise_()
         window.activateWindow()
 
+    def pin_centered(self, pixmap: QPixmap) -> None:
+        screen = QGuiApplication.primaryScreen()
+        center = screen.availableGeometry().center() if screen else QPoint(200, 200)
+        dpr = pixmap.devicePixelRatio() or 1.0
+        offset = QPoint(round(pixmap.width() / dpr / 2), round(pixmap.height() / dpr / 2))
+        self.pin(pixmap, center - offset)
+
     def paste_pin(self) -> None:
         pixmap = QGuiApplication.clipboard().pixmap()
         if pixmap.isNull():
             self.notify("沒有可釘的圖", "剪貼簿裡沒有影像。", QSystemTrayIcon.Warning)
             return
-        cursor = QGuiApplication.primaryScreen().availableGeometry().center()
-        self.pin(pixmap, cursor - QPoint(pixmap.width() // 2, pixmap.height() // 2))
+        self.pin_centered(pixmap)
 
     def forget_pin(self, window: PinWindow) -> None:
         if window in self.pins:
@@ -210,6 +230,30 @@ class SnipTagApp(QObject):
     def close_all_pins(self) -> None:
         for window in list(self.pins):
             window.close()
+
+    def clear_click_through(self) -> None:
+        """滑鼠穿透的釘圖收不到鍵盤，只能從這裡救回來。"""
+        for window in self.pins:
+            if window.click_through:
+                window.set_click_through(False)
+
+    # --- 歷史 -----------------------------------------------------
+    def show_history(self) -> None:
+        if self.history_dialog is None:
+            self.history_dialog = HistoryDialog(self.history, self)
+            self.history_dialog.setWindowIcon(self.icon)
+            self.history_dialog.finished.connect(self._on_history_closed)
+        self.history_dialog.reload()
+        self.history_dialog.show()
+        self.history_dialog.raise_()
+        self.history_dialog.activateWindow()
+
+    def _on_history_closed(self, _result) -> None:
+        self.history_dialog = None
+
+    def _refresh_history_dialog(self) -> None:
+        if self.history_dialog is not None and self.history_dialog.isVisible():
+            self.history_dialog.reload()
 
     # --- 設定 -----------------------------------------------------
     def change_topic(self) -> None:
