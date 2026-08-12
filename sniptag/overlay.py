@@ -72,11 +72,16 @@ class Toolbar(QWidget):
         self.tool_buttons: dict[str, QPushButton] = {}
         for key, label, shortcut in annotate.TOOL_LABELS:
             button = self._button(f"{label} {shortcut}", checkable=True)
+            if key == "mosaic":
+                button.setToolTip(
+                    "馬賽克只是把畫面打散，對已知字型的文字有機會被還原推算。\n"
+                    "真正的機敏資訊請改用「矩形 + 填滿」蓋成純色。")
             tools.addWidget(button)
             self.tool_buttons[key] = button
         tools.addWidget(_separator())
 
         self.fill_button = self._button("填滿", checkable=True)
+        self.fill_button.setToolTip("實心填色。用純色蓋住是最可靠的遮蔽方式。")
         tools.addWidget(self.fill_button)
         tools.addWidget(_separator())
 
@@ -161,19 +166,6 @@ class Toolbar(QWidget):
         self.fill_button.setEnabled(tool in annotate.FILLABLE)
 
 
-class _ShotContext(annotate.Context):
-    """讓馬賽克拿得到底圖像素。"""
-
-    def __init__(self, shot: DesktopShot, origin: QPoint) -> None:
-        self.shot = shot
-        self.origin = origin
-
-    def pixels(self, rect: QRect) -> QImage:
-        pixmap = self.shot.crop(rect.translated(self.origin))
-        pixmap.setDevicePixelRatio(1.0)
-        return pixmap.toImage()
-
-
 class Overlay(QWidget):
     finished = Signal(QPixmap, str, QRect)   # 影像、動作、螢幕上的位置
     cancelled = Signal()
@@ -191,8 +183,9 @@ class Overlay(QWidget):
 
         self.shot = shot
         self.origin = shot.logical_geometry.topLeft()
-        self.context = _ShotContext(shot, self.origin)
         self.preview_cb = preview_cb
+        self._base_image: QImage | None = None   # 選取範圍的原始像素，快取用
+        self._base_for: QRect | None = None
         self.quick = quick
 
         self.selection = QRect()
@@ -264,6 +257,18 @@ class Overlay(QWidget):
 
     def _to_global(self, rect: QRect) -> QRect:
         return rect.translated(self.origin)
+
+    def _scale(self, selection: QRect) -> float:
+        return self.shot.dpr_for(self._to_global(selection))
+
+    def _base(self, selection: QRect) -> QImage:
+        """選取範圍的原始像素（實體解析度）。只有換範圍時才重新裁切。"""
+        if self._base_for != selection or self._base_image is None:
+            pixmap = self.shot.crop(self._to_global(selection))
+            pixmap.setDevicePixelRatio(1.0)
+            self._base_image = pixmap.toImage()
+            self._base_for = QRect(selection)
+        return self._base_image
 
     # --- 標註設定 -------------------------------------------------
     def set_tool(self, tool: str | None) -> None:
@@ -351,11 +356,12 @@ class Overlay(QWidget):
         painter.restore()
 
         if has_selection:
-            painter.save()
-            painter.setClipRect(selection)
-            painter.setRenderHint(QPainter.Antialiasing, True)
-            self.layer.draw(painter, self.context, self.pending)
-            painter.restore()
+            # 預覽與輸出走同一條合成路徑，所見即所得
+            canvas = self._base(selection).copy()
+            annotate.render(self.layer, canvas, self._scale(selection),
+                            selection.topLeft(), self.pending)
+            painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+            painter.drawImage(selection, canvas)
             self._paint_selected_marker(painter)
             self._paint_selection(painter, selection)
         elif self.hover_rect is not None:
@@ -844,14 +850,11 @@ class Overlay(QWidget):
 
         dpr = pixmap.devicePixelRatio() or 1.0
         pixmap.setDevicePixelRatio(1.0)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.scale(dpr, dpr)
-        painter.translate(-selection.topLeft())
-        self.layer.draw(painter, self.context)
-        painter.end()
-        pixmap.setDevicePixelRatio(dpr)
-        return pixmap
+        image = pixmap.toImage()
+        annotate.render(self.layer, image, dpr, selection.topLeft())
+        result = QPixmap.fromImage(image)
+        result.setDevicePixelRatio(dpr)
+        return result
 
     def _emit(self, action: str) -> None:
         self._commit_text()

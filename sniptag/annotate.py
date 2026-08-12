@@ -54,13 +54,6 @@ class Style:
         return Style(self.color, self.width, self.filled)
 
 
-class Context:
-    """提供底圖像素給馬賽克使用。"""
-
-    def pixels(self, rect: QRect) -> QImage:  # pragma: no cover - 介面宣告
-        raise NotImplementedError
-
-
 # --- 兩點式圖形 ---------------------------------------------------
 @dataclass
 class _TwoPoint:
@@ -82,7 +75,7 @@ class _TwoPoint:
 
 
 class RectShape(_TwoPoint):
-    def draw(self, painter: QPainter, _ctx: Context) -> None:
+    def draw(self, painter: QPainter) -> None:
         painter.setPen(self.style.pen(Qt.SquareCap))
         painter.setBrush(QColor(self.style.color) if self.style.filled else Qt.NoBrush)
         painter.drawRect(self.rect)
@@ -94,7 +87,7 @@ class RectShape(_TwoPoint):
 
 
 class EllipseShape(_TwoPoint):
-    def draw(self, painter: QPainter, _ctx: Context) -> None:
+    def draw(self, painter: QPainter) -> None:
         painter.setPen(self.style.pen(Qt.SquareCap))
         painter.setBrush(QColor(self.style.color) if self.style.filled else Qt.NoBrush)
         painter.drawEllipse(self.rect)
@@ -113,7 +106,7 @@ class EllipseShape(_TwoPoint):
 
 
 class LineShape(_TwoPoint):
-    def draw(self, painter: QPainter, _ctx: Context) -> None:
+    def draw(self, painter: QPainter) -> None:
         painter.setPen(self.style.pen())
         painter.setBrush(Qt.NoBrush)
         painter.drawLine(self.start, self.end)
@@ -124,7 +117,7 @@ class LineShape(_TwoPoint):
 
 
 class ArrowShape(_TwoPoint):
-    def draw(self, painter: QPainter, _ctx: Context) -> None:
+    def draw(self, painter: QPainter) -> None:
         dx = self.end.x() - self.start.x()
         dy = self.end.y() - self.start.y()
         length = math.hypot(dx, dy)
@@ -154,21 +147,28 @@ class ArrowShape(_TwoPoint):
 
 
 class MosaicShape(_TwoPoint):
-    def draw(self, painter: QPainter, ctx: Context) -> None:
-        rect = self.rect
+    """打上馬賽克。
+
+    和其他圖形不同，馬賽克要讀取「畫到目前為止」的畫面才能正確疊在別的標註上面，
+    所以它不是用畫筆畫上去，而是由 render() 直接對輸出影像做處理。
+    """
+
+    def draw(self, painter: QPainter) -> None:
+        # 由 render() 呼叫 apply() 處理，這裡不做事
+        return
+
+    def apply(self, image: QImage, scale: float, offset: QPoint) -> None:
+        rect = _to_device(self.rect, scale, offset).intersected(image.rect())
         if rect.width() < 2 or rect.height() < 2:
             return
-        source = ctx.pixels(rect)
-        if source.isNull():
-            return
-        block = max(2, MOSAIC_BLOCK)
-        small = source.scaled(max(1, rect.width() // block),
-                              max(1, rect.height() // block),
-                              Qt.IgnoreAspectRatio, Qt.FastTransformation)
-        painter.save()
+        block = max(2, round(MOSAIC_BLOCK * scale))
+        small = image.copy(rect).scaled(
+            max(1, rect.width() // block), max(1, rect.height() // block),
+            Qt.IgnoreAspectRatio, Qt.FastTransformation)
+        painter = QPainter(image)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, False)
         painter.drawImage(rect, small)
-        painter.restore()
+        painter.end()
 
     def hit(self, point: QPoint) -> bool:
         return self.rect.contains(point)
@@ -201,7 +201,7 @@ class _Stroke:
 
 
 class PenShape(_Stroke):
-    def draw(self, painter: QPainter, _ctx: Context) -> None:
+    def draw(self, painter: QPainter) -> None:
         if len(self.points) < 2:
             return
         painter.setPen(self.style.pen())
@@ -212,7 +212,7 @@ class PenShape(_Stroke):
 class MarkerShape(_Stroke):
     """螢光筆：半透明、加寬，用相乘混色讓底下文字還看得見。"""
 
-    def draw(self, painter: QPainter, _ctx: Context) -> None:
+    def draw(self, painter: QPainter) -> None:
         if len(self.points) < 2:
             return
         color = QColor(self.style.color)
@@ -258,7 +258,7 @@ class TextShape:
     def hit(self, point: QPoint) -> bool:
         return self.bounds().adjusted(-4, -4, 4, 4).contains(point)
 
-    def draw(self, painter: QPainter, _ctx: Context) -> None:
+    def draw(self, painter: QPainter) -> None:
         if not self.text:
             return
         painter.setFont(self.font())
@@ -288,7 +288,7 @@ class NumberShape:
         return (math.hypot(point.x() - self.pos.x(), point.y() - self.pos.y())
                 <= self.radius() + 4)
 
-    def draw(self, painter: QPainter, _ctx: Context) -> None:
+    def draw(self, painter: QPainter) -> None:
         bounds = self.bounds()
         painter.setPen(Qt.NoPen)
         painter.setBrush(QColor(self.style.color))
@@ -376,11 +376,48 @@ class Layer:
         used = [s.number for s in self.shapes if isinstance(s, NumberShape)]
         return max(used) + 1 if used else 1
 
-    def draw(self, painter: QPainter, ctx: Context, preview=None) -> None:
-        for shape in self.shapes:
-            shape.draw(painter, ctx)
-        if preview is not None:
-            preview.draw(painter, ctx)
+    def all_shapes(self, preview=None) -> list:
+        return self.shapes + ([preview] if preview is not None else [])
+
+
+def _to_device(rect: QRect, scale: float, offset: QPoint) -> QRect:
+    """標註座標 -> 輸出影像的實體像素座標。"""
+    return QRect(round((rect.x() - offset.x()) * scale),
+                 round((rect.y() - offset.y()) * scale),
+                 round(rect.width() * scale), round(rect.height() * scale))
+
+
+def _begin(image: QImage, scale: float, offset: QPoint) -> QPainter:
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    painter.scale(scale, scale)
+    painter.translate(-offset)
+    return painter
+
+
+def render(layer: "Layer", image: QImage, scale: float, offset: QPoint,
+           preview=None) -> None:
+    """把整個圖層畫到 image 上（就地修改）。
+
+    image 的座標 = (標註座標 - offset) * scale。
+
+    馬賽克必須讀取已經畫上去的內容，否則畫在它底下的標註會被無視 ——
+    例如先用實心矩形遮住機敏資訊、再蓋馬賽克，遮住的東西會又被翻出來。
+    QPainter 作用中無法安全讀取同一張 QImage，所以遇到馬賽克就先收起畫筆、
+    處理完再重新開始。
+    """
+    painter = _begin(image, scale, offset)
+    try:
+        for shape in layer.all_shapes(preview):
+            if isinstance(shape, MosaicShape):
+                painter.end()
+                shape.apply(image, scale, offset)
+                painter = _begin(image, scale, offset)
+            else:
+                shape.draw(painter)
+    finally:
+        if painter.isActive():
+            painter.end()
 
 
 def make_shape(tool: str, start: QPoint, end: QPoint, style: Style):

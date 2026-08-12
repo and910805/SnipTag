@@ -7,7 +7,7 @@ from __future__ import annotations
 import sys
 
 from PySide6.QtCore import QPoint, QRect, Qt
-from PySide6.QtGui import QColor, QImage, QPainter
+from PySide6.QtGui import QColor, QFont, QImage, QPainter
 from PySide6.QtWidgets import QApplication
 
 from sniptag import annotate
@@ -29,6 +29,23 @@ def build_shot() -> DesktopShot:
     # 放一塊高對比的圖樣，用來確認馬賽克真的動到了像素
     for i in range(0, 400, 8):
         painter.fillRect(QRect(600 + i, 400, 4, 200), QColor(10, 10, 10))
+    painter.end()
+    return DesktopShot(image, QPoint(0, 0), [MONITOR])
+
+
+def build_detailed_shot() -> DesktopShot:
+    """白底加上細密的文字與條紋，用來檢查馬賽克到底吃掉多少細節。"""
+    image = QImage(int(800 * DPR), int(600 * DPR), QImage.Format_RGB32)
+    image.fill(QColor(255, 255, 255))
+    painter = QPainter(image)
+    font = QFont("Consolas")
+    font.setPixelSize(28)
+    painter.setFont(font)
+    painter.setPen(QColor(10, 10, 10))
+    for line in range(6):
+        painter.drawText(380, 420 + line * 34, f"SECRET-{line}: hunter2 xyzzy")
+    for offset in range(0, 480, 7):
+        painter.fillRect(QRect(380 + offset, 620, 3, 40), QColor(200, 30, 90))
     painter.end()
     return DesktopShot(image, QPoint(0, 0), [MONITOR])
 
@@ -209,6 +226,67 @@ def main() -> None:
     probe.selected_shape = shape
     probe.delete_selected()
     check(len(probe.layer) == 0 and probe.selected_shape is None, "刪除後清空選取")
+    probe.close()
+
+    print("馬賽克遮蔽")
+
+    def colors_in(image, rect):
+        return {image.pixelColor(x, y).rgb()
+                for y in range(rect.top(), rect.bottom() + 1)
+                for x in range(rect.left(), rect.right() + 1)}
+
+    detailed = build_detailed_shot()
+    probe = new_overlay(detailed)
+    area = QRect(200, 200, 240, 120)          # 標註座標
+    device = QRect(int((area.x() - SELECTION.x()) * DPR),
+                   int((area.y() - SELECTION.y()) * DPR),
+                   int(area.width() * DPR), int(area.height() * DPR))
+    original = colors_in(probe.shot.crop(SELECTION).toImage(), device)
+    probe.layer.add(annotate.MosaicShape(area.topLeft(), area.bottomRight(),
+                                         annotate.Style()))
+    mosaicked = colors_in(probe.render_result().toImage(), device)
+    check(len(original) > 50, f"原圖該區細節豐富（{len(original)} 色）")
+    check(len(mosaicked) * 10 < len(original),
+          f"馬賽克後大幅減少（{len(original)} -> {len(mosaicked)} 色）")
+    probe.close()
+
+    print("馬賽克疊在已畫好的標註上（不能把底下遮住的東西翻出來）")
+    probe = new_overlay(detailed)
+    probe.layer.add(annotate.RectShape(
+        area.topLeft(), area.bottomRight(),
+        annotate.Style(color="#000000", width=2, filled=True)))
+    probe.layer.add(annotate.MosaicShape(area.topLeft(), area.bottomRight(),
+                                         annotate.Style()))
+    covered = colors_in(probe.render_result().toImage(),
+                        device.adjusted(6, 6, -6, -6))
+    check(covered == {QColor("#000000").rgb()},
+          "先實心遮蔽再蓋馬賽克，結果只有純黑")
+    probe.close()
+
+    print("馬賽克方塊大小跟著解析度走")
+    probe = new_overlay(detailed)
+    probe.layer.add(annotate.MosaicShape(area.topLeft(), area.bottomRight(),
+                                         annotate.Style()))
+    out = probe.render_result().toImage()
+    block = int(annotate.MOSAIC_BLOCK * DPR)
+    ragged, block_colors = [], set()
+    for top in range(device.top(), device.bottom() - block + 1, block):
+        for left in range(device.left(), device.right() - block + 1, block):
+            corner = out.pixelColor(left, top).rgb()
+            block_colors.add(corner)
+            for y in range(top, top + block):
+                for x in range(left, left + block):
+                    if out.pixelColor(x, y).rgb() != corner:
+                        ragged.append((left, top))
+                        break
+                else:
+                    continue
+                break
+    check(not ragged,
+          f"每個 {block}×{block} 方塊內部都是單一顏色"
+          f"（{len(ragged)} 個不合格）")
+    check(len(block_colors) > 3,
+          f"方塊之間顏色有差異，確實蓋在有內容的地方（{len(block_colors)} 色）")
     probe.close()
 
     print("色彩格式")
