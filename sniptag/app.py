@@ -116,6 +116,19 @@ class SnipTagApp(QObject):
         self.hotkeys.register(self.cfg["hotkey_pin"], self.paste_pin)
         self.hotkeys.register(self.cfg["hotkey_topic"], self.change_topic)
 
+    def reload_hotkeys(self, announce: bool = False) -> None:
+        """改完設定立即套用，不需要重新啟動。"""
+        self.hotkeys.unregister_all()
+        self._register_hotkeys()
+        if self.hotkeys.failed:
+            self.notify(
+                "部分熱鍵註冊失敗",
+                "被其他程式佔用：" + "、".join(self.hotkeys.failed),
+                QSystemTrayIcon.Warning,
+            )
+        elif announce:
+            self.notify("設定已套用", "熱鍵已立即生效。")
+
     # --- 截圖流程 -------------------------------------------------
     def start_capture(self, quick: bool = False) -> None:
         if self.overlay is not None:
@@ -265,13 +278,20 @@ class SnipTagApp(QObject):
             self.notify("主題已切換", f"{self.cfg['topic']}　下一張：{self.namer.preview()}")
 
     def open_settings(self) -> None:
-        dialog = SettingsDialog(self.cfg)
-        dialog.setWindowIcon(self.icon)
-        if dialog.exec() == SettingsDialog.Accepted:
-            dialog.apply_to_config()
-            self.menu = self._build_menu()
-            self.tray.setContextMenu(self.menu)
-            self._refresh_tooltip()
+        # 全域熱鍵會攔截 F1 這類按鍵，錄製欄位就收不到了 —— 開設定期間先卸下
+        self.hotkeys.unregister_all()
+        accepted = False
+        try:
+            dialog = SettingsDialog(self.cfg)
+            dialog.setWindowIcon(self.icon)
+            accepted = dialog.exec() == SettingsDialog.Accepted
+            if accepted:
+                dialog.apply_to_config()
+                self.menu = self._build_menu()
+                self.tray.setContextMenu(self.menu)
+                self._refresh_tooltip()
+        finally:
+            self.reload_hotkeys(announce=accepted)
 
     def open_folder(self) -> None:
         directory = self.namer.target_dir()

@@ -7,7 +7,7 @@ from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 ACCENT = "#2d7ff9"
 
 
-def app_icon(size: int = 128) -> QIcon:
+def icon_pixmap(size: int = 256) -> QPixmap:
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.transparent)
     painter = QPainter(pixmap)
@@ -30,4 +30,14 @@ def app_icon(size: int = 128) -> QIcon:
     painter.drawLine(int(size * 0.13), int(size * 0.27), int(size * 0.87), int(size * 0.27))
     painter.drawLine(int(size * 0.13), int(size * 0.73), int(size * 0.87), int(size * 0.73))
     painter.end()
-    return QIcon(pixmap)
+    return pixmap
+
+
+def app_icon(size: int = 128) -> QIcon:
+    return QIcon(icon_pixmap(size))
+
+
+def write_ico(path) -> bool:
+    """輸出多尺寸 .ico，給 PyInstaller 當 exe 圖示用。"""
+    image = icon_pixmap(256).toImage()
+    return image.save(str(path), "ICO")

@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安裝相依套件
+        run: pip install -r requirements.txt
+
+      - name: 執行測試
+        env:
+          # 沒有實體桌面，用 Qt 的離螢幕平台
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python test_naming.py
+          python test_dpi.py
+          python test_annotate.py
+          python test_history.py
+          python test_hotkeys.py

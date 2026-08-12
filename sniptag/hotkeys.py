@@ -87,6 +87,8 @@ class HotkeyManager:
     def register(self, spec: str, callback) -> bool:
         if not self._available:
             return False
+        if not str(spec).strip():
+            return False        # 空白 = 使用者刻意停用，不算失敗
         parsed = parse(spec)
         if parsed is None:
             self.failed.append(spec)

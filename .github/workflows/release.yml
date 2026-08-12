@@ -1,0 +1,84 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安裝相依套件
+        run: pip install -r requirements.txt pyinstaller
+
+      - name: 執行測試
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python test_naming.py
+          python test_dpi.py
+          python test_annotate.py
+          python test_history.py
+          python test_hotkeys.py
+
+      - name: 打包 exe
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python build.py
+
+      - name: 保留產物
+        uses: actions/upload-artifact@v4
+        with:
+          name: SnipTag-exe
+          path: dist/SnipTag.exe
+
+      - name: 發佈 Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $repo = "${{ github.repository }}"
+          $notes = @'
+          ## 下載
+
+          直接下載下面的 **SnipTag.exe**，雙擊就能用 —— 免安裝、不需要 Python、不需要系統管理員權限。
+
+          啟動後常駐在系統匣（右下角），右鍵圖示可叫出所有功能。
+
+          ## 先設定主題，再開始截圖
+
+          | 熱鍵 | 功能 |
+          | --- | --- |
+          | `Ctrl+F1` | 設定這場會議 / 這個題目的主題 |
+          | `Shift+F1` | 快速截圖：放開滑鼠**直接存檔**，檔名自動接續 |
+          | `F1` | 框選截圖，出現工具列與標註功能 |
+          | `F3` | 把剪貼簿裡的圖釘到桌面 |
+
+          設好主題 `MDASH` 之後，每按一次 `Shift+F1` 框一下，就依序存成
+          `MDASH_01.png`、`MDASH_02.png`、`MDASH_03.png`…… 不跳對話框、不用打字。
+
+          完整說明請看 README：https://github.com/__REPO__#readme
+
+          ## 注意
+
+          - 這個 exe 沒有程式碼簽章，Windows SmartScreen 可能會跳「不明的發行者」。
+            按「其他資訊」→「仍要執行」即可，或自行從原始碼建置（`python build.py`）。
+          - 若同時開著 Snipaste，`F1` / `F3` 會被它搶走。SnipTag 啟動時會通知你
+            哪個熱鍵註冊失敗，到「設定…」換一組即可。
+          '@
+          $notes.Replace("__REPO__", $repo) | Out-File -FilePath notes.md -Encoding utf8
+          gh release create "$env:GITHUB_REF_NAME" dist/SnipTag.exe `
+            --title "SnipTag $env:GITHUB_REF_NAME" `
+            --notes-file notes.md

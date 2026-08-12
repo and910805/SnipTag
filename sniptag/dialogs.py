@@ -2,12 +2,43 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
     QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
+from . import hotkeys
 from .naming import Namer
+
+MODIFIER_KEYS = (Qt.Key_Control, Qt.Key_Shift, Qt.Key_Alt, Qt.Key_Meta,
+                 Qt.Key_AltGr, Qt.Key_CapsLock, Qt.Key_NumLock)
+CLEAR_KEYS = (Qt.Key_Backspace, Qt.Key_Delete, Qt.Key_Escape)
+
+
+class HotkeyEdit(QLineEdit):
+    """點一下就開始錄製：直接按下想要的組合鍵，不用自己打字。"""
+
+    def __init__(self, value: str, parent: QWidget | None = None) -> None:
+        super().__init__(value, parent)
+        self.setReadOnly(True)
+        self.setPlaceholderText("點一下，然後按下想要的組合鍵（Esc 停用）")
+        self.setToolTip("點一下之後直接按組合鍵；Esc / Backspace 可清空停用此熱鍵。")
+
+    def keyPressEvent(self, event) -> None:
+        key = event.key()
+        if key in MODIFIER_KEYS:
+            return                      # 等使用者按下真正的那個鍵
+        if key in CLEAR_KEYS:
+            self.clear()
+            return
+        try:
+            combo = QKeySequence(event.keyCombination()).toString()
+        except (AttributeError, TypeError):
+            combo = QKeySequence(int(event.modifiers().value) | key).toString()
+        if combo and hotkeys.parse(combo) is not None:
+            self.setText(combo)
+        # 不支援的組合就忽略，維持原本的值
 
 TEMPLATE_HELP = (
     "可用欄位：{topic} 主題、{n} 流水號、{date} 20260812、"
@@ -116,16 +147,19 @@ class SettingsDialog(QDialog):
         self.notify_check.setChecked(bool(config["notify_on_save"]))
         form.addRow("", self.notify_check)
 
-        self.hk_capture = QLineEdit(config["hotkey_capture"], self)
-        self.hk_quick = QLineEdit(config["hotkey_quickshot"], self)
-        self.hk_pin = QLineEdit(config["hotkey_pin"], self)
-        self.hk_topic = QLineEdit(config["hotkey_topic"], self)
+        self.hk_capture = HotkeyEdit(config["hotkey_capture"], self)
+        self.hk_quick = HotkeyEdit(config["hotkey_quickshot"], self)
+        self.hk_pin = HotkeyEdit(config["hotkey_pin"], self)
+        self.hk_topic = HotkeyEdit(config["hotkey_topic"], self)
         form.addRow("熱鍵：框選截圖", self.hk_capture)
         form.addRow("熱鍵：快速截圖存檔", self.hk_quick)
         form.addRow("熱鍵：貼上為釘圖", self.hk_pin)
         form.addRow("熱鍵：切換主題", self.hk_topic)
-        hotkey_note = QLabel("熱鍵改動需重新啟動 SnipTag 才生效。", self)
+        hotkey_note = QLabel(
+            "點一下欄位後直接按下組合鍵即可；Esc 清空代表停用。按下 OK 立即生效。",
+            self)
         hotkey_note.setStyleSheet("color:#888; font-size:11px;")
+        hotkey_note.setWordWrap(True)
         form.addRow("", hotkey_note)
 
         layout = QVBoxLayout(self)
