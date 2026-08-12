@@ -16,10 +16,12 @@ from PySide6.QtGui import (
 )
 
 PALETTE = ["#f5423f", "#ff9f1c", "#2ecc71", "#2d7ff9", "#ffffff", "#1b2330"]
-WIDTHS = (("細", 2), ("中", 4), ("粗", 7))
+WIDTHS = ((1, 2), (2, 3), (3, 4), (4, 6), (5, 9))   # 顯示標籤, 實際線寬
 MOSAIC_BLOCK = 12
 TEXT_FONT = "Microsoft JhengHei UI"
 HIT_SLACK = 6
+CORNER_RADIUS = 10          # 圓角矩形的半徑
+ERASER_RADIUS = 14          # 橡皮擦的作用半徑
 
 
 def _distance_to_segment(point: QPoint, start: QPoint, end: QPoint) -> float:
@@ -30,6 +32,13 @@ def _distance_to_segment(point: QPoint, start: QPoint, end: QPoint) -> float:
     t = max(0.0, min(1.0, t))
     return math.hypot(point.x() - (start.x() + t * dx),
                       point.y() - (start.y() + t * dy))
+
+
+def _contrast_color(background: QColor) -> QColor:
+    """在給定底色上選一個讀得清楚的字色。"""
+    luminance = (0.299 * background.red() + 0.587 * background.green()
+                 + 0.114 * background.blue())
+    return QColor("#1b2330") if luminance > 140 else QColor("#ffffff")
 
 
 def _near_outline(point: QPoint, rect: QRect, slack: int) -> bool:
@@ -43,15 +52,23 @@ class Style:
     color: str = PALETTE[0]
     width: int = 4
     filled: bool = False
+    dashed: bool = False
+    rounded: bool = False       # 圓角矩形
+    both_ends: bool = False     # 雙向箭頭
 
     def pen(self, cap=Qt.RoundCap) -> QPen:
         pen = QPen(QColor(self.color), self.width)
         pen.setCapStyle(cap)
         pen.setJoinStyle(Qt.RoundJoin)
+        if self.dashed:
+            pen.setStyle(Qt.CustomDashLine)
+            # 以線寬為單位，粗細改變時虛線比例才不會跑掉
+            pen.setDashPattern([3.0, 2.4])
         return pen
 
     def copy(self) -> "Style":
-        return Style(self.color, self.width, self.filled)
+        return Style(self.color, self.width, self.filled, self.dashed,
+                     self.rounded, self.both_ends)
 
 
 # --- 兩點式圖形 ---------------------------------------------------
@@ -78,7 +95,11 @@ class RectShape(_TwoPoint):
     def draw(self, painter: QPainter) -> None:
         painter.setPen(self.style.pen(Qt.SquareCap))
         painter.setBrush(QColor(self.style.color) if self.style.filled else Qt.NoBrush)
-        painter.drawRect(self.rect)
+        if self.style.rounded:
+            radius = min(CORNER_RADIUS, self.rect.width() / 2, self.rect.height() / 2)
+            painter.drawRoundedRect(self.rect, radius, radius)
+        else:
+            painter.drawRect(self.rect)
 
     def hit(self, point: QPoint) -> bool:
         if self.style.filled:
@@ -125,21 +146,33 @@ class ArrowShape(_TwoPoint):
             return
         head = max(11.0, self.style.width * 3.4)
         angle = math.atan2(dy, dx)
-        # 線段先收短一點，才不會從箭頭尖端戳出來
-        shaft_end = QPointF(self.end.x() - math.cos(angle) * head * 0.72,
-                            self.end.y() - math.sin(angle) * head * 0.72)
+        # 線段兩端各收短一點，才不會從箭頭尖端戳出來
+        inset = head * 0.72
+        shaft_start = QPointF(self.start)
+        if self.style.both_ends:
+            shaft_start = QPointF(self.start.x() + math.cos(angle) * inset,
+                                  self.start.y() + math.sin(angle) * inset)
+        shaft_end = QPointF(self.end.x() - math.cos(angle) * inset,
+                            self.end.y() - math.sin(angle) * inset)
         painter.setPen(self.style.pen())
         painter.setBrush(Qt.NoBrush)
-        painter.drawLine(QPointF(self.start), shaft_end)
+        painter.drawLine(shaft_start, shaft_end)
 
-        spread = math.radians(24)
-        left = QPointF(self.end.x() - math.cos(angle - spread) * head,
-                       self.end.y() - math.sin(angle - spread) * head)
-        right = QPointF(self.end.x() - math.cos(angle + spread) * head,
-                        self.end.y() - math.sin(angle + spread) * head)
         painter.setPen(Qt.NoPen)
         painter.setBrush(QColor(self.style.color))
-        painter.drawPolygon(QPolygonF([QPointF(self.end), left, right]))
+        self._draw_head(painter, QPointF(self.end), angle, head)
+        if self.style.both_ends:
+            self._draw_head(painter, QPointF(self.start), angle + math.pi, head)
+
+    @staticmethod
+    def _draw_head(painter: QPainter, tip: QPointF, angle: float,
+                   head: float) -> None:
+        spread = math.radians(24)
+        left = QPointF(tip.x() - math.cos(angle - spread) * head,
+                       tip.y() - math.sin(angle - spread) * head)
+        right = QPointF(tip.x() - math.cos(angle + spread) * head,
+                        tip.y() - math.sin(angle + spread) * head)
+        painter.drawPolygon(QPolygonF([tip, left, right]))
 
     def hit(self, point: QPoint) -> bool:
         return _distance_to_segment(point, self.start, self.end) <= (
@@ -262,7 +295,15 @@ class TextShape:
         if not self.text:
             return
         painter.setFont(self.font())
-        painter.setPen(QColor(self.style.color))
+        if self.style.filled:
+            # 底色用文字色，字換成對比色，放在雜亂背景上才讀得到
+            box = self.bounds().adjusted(-4, -2, 4, 2)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(self.style.color))
+            painter.drawRoundedRect(box, 3, 3)
+            painter.setPen(_contrast_color(QColor(self.style.color)))
+        else:
+            painter.setPen(QColor(self.style.color))
         painter.drawText(self.bounds(), Qt.AlignLeft | Qt.AlignTop, self.text)
 
 
@@ -322,9 +363,13 @@ TOOL_LABELS = (
     ("mosaic", "馬賽克", "M"),
     ("text", "文字", "T"),
     ("number", "序號", "N"),
+    ("eraser", "橡皮擦", "E"),
 )
 
-FILLABLE = ("rect", "ellipse")
+FILLABLE = ("rect", "ellipse", "text")   # text 的「填滿」= 加底色
+ROUNDABLE = ("rect",)
+DASHABLE = ("rect", "ellipse", "line", "arrow", "pen")
+DOUBLE_ENDED = ("arrow",)
 
 
 # --- 圖層 ---------------------------------------------------------
@@ -371,6 +416,17 @@ class Layer:
             if shape.hit(point):
                 return shape
         return None
+
+    def erase_at(self, point: QPoint, radius: int = ERASER_RADIUS) -> bool:
+        """擦掉游標附近的標註；有擦到東西就回傳 True。"""
+        targets = [s for s in self.shapes
+                   if any(s.hit(point + QPoint(dx, dy))
+                          for dx, dy in ((0, 0), (-radius, 0), (radius, 0),
+                                         (0, -radius), (0, radius)))]
+        for shape in targets:
+            self.shapes.remove(shape)
+            self._undone.append(shape)
+        return bool(targets)
 
     def next_number(self) -> int:
         used = [s.number for s in self.shapes if isinstance(s, NumberShape)]

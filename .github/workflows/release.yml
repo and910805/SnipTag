@@ -35,6 +35,7 @@ jobs:
           python test_history.py
           python test_hotkeys.py
           python test_autostart.py
+          python test_effects.py
 
       - name: 打包 exe
         run: python build.py
@@ -77,8 +78,8 @@ jobs:
 
           - 這個 exe 沒有程式碼簽章，Windows SmartScreen 可能會跳「不明的發行者」。
             按「其他資訊」→「仍要執行」即可，或自行從原始碼建置（`python build.py`）。
-          - 若同時開著 Snipaste，`F1` / `F3` 會被它搶走。SnipTag 啟動時會通知你
-            哪個熱鍵註冊失敗，到「設定…」換一組即可。
+          - 若已經有別的截圖工具綁在 `F1` / `F3`，熱鍵會被它搶走。SnipTag 啟動時
+            會通知你哪個熱鍵註冊失敗，到「設定…」換一組即可。
           '@
           $notes.Replace("__REPO__", $repo) | Out-File -FilePath notes.md -Encoding utf8
           gh release create "$env:GITHUB_REF_NAME" dist/SnipTag.exe `

@@ -10,7 +10,7 @@ from PySide6.QtCore import QObject, QPoint, QRect, QTimer, Qt
 from PySide6.QtGui import QAction, QGuiApplication, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QFileDialog, QMenu, QMessageBox, QSystemTrayIcon
 
-from . import screens
+from . import effects, screens, winrects
 from .config import Config
 from .dialogs import SettingsDialog, TopicDialog
 from .history import History, HistoryDialog
@@ -29,7 +29,9 @@ class SnipTagApp(QObject):
         self.namer = Namer(self.cfg)
         self.icon = app_icon()
         self.overlay: Overlay | None = None
+        self.last_region: QRect | None = None
         self.pins: list[PinWindow] = []
+        self.pins_hidden = False
         self.history = History()
         self.history_dialog: HistoryDialog | None = None
 
@@ -55,7 +57,14 @@ class SnipTagApp(QObject):
         entries = [
             (f"框選截圖\t{self.cfg['hotkey_capture']}", lambda: self.start_capture(False)),
             (f"快速截圖存檔\t{self.cfg['hotkey_quickshot']}", lambda: self.start_capture(True)),
+            (f"重複上次的範圍\t{self.cfg['hotkey_repeat']}", self.repeat_last_capture),
+            ("擷取作用中視窗", self.capture_active_window),
+            ("延時 3 秒截圖", lambda: self.start_delayed_capture(3)),
+            ("延時 5 秒截圖", lambda: self.start_delayed_capture(5)),
+            None,
             (f"貼上為釘圖\t{self.cfg['hotkey_pin']}", self.paste_pin),
+            (f"隱藏／顯示所有釘圖\t{self.cfg['hotkey_hide_pins']}",
+             self.toggle_pins_hidden),
             None,
             (f"設定主題…\t{self.cfg['hotkey_topic']}", self.change_topic),
             ("截圖歷史…", self.show_history),
@@ -115,6 +124,8 @@ class SnipTagApp(QObject):
         self.hotkeys.register(self.cfg["hotkey_quickshot"], lambda: self.start_capture(True))
         self.hotkeys.register(self.cfg["hotkey_pin"], self.paste_pin)
         self.hotkeys.register(self.cfg["hotkey_topic"], self.change_topic)
+        self.hotkeys.register(self.cfg["hotkey_repeat"], self.repeat_last_capture)
+        self.hotkeys.register(self.cfg["hotkey_hide_pins"], self.toggle_pins_hidden)
 
     def reload_hotkeys(self, announce: bool = False) -> None:
         """改完設定立即套用，不需要重新啟動。"""
@@ -130,7 +141,8 @@ class SnipTagApp(QObject):
             self.notify("設定已套用", "熱鍵已立即生效。")
 
     # --- 截圖流程 -------------------------------------------------
-    def start_capture(self, quick: bool = False) -> None:
+    def start_capture(self, quick: bool = False,
+                      region: QRect | None = None) -> None:
         if self.overlay is not None:
             return
         shot = screens.grab_desktop()
@@ -142,12 +154,43 @@ class SnipTagApp(QObject):
         overlay.cancelled.connect(self._on_capture_cancelled)
         self.overlay = overlay
         overlay.start()
+        if region is not None:
+            overlay.preset_selection(region)
 
-    def _on_capture_cancelled(self) -> None:
+    def start_delayed_capture(self, seconds: int) -> None:
+        """延時截圖：先讓使用者把選單、下拉式清單之類的東西叫出來。"""
+        self.notify("延時截圖", f"{seconds} 秒後開始，先把畫面準備好。")
+        QTimer.singleShot(seconds * 1000, lambda: self.start_capture(False))
+
+    def repeat_last_capture(self) -> None:
+        """用上次的框選範圍再拍一次。"""
+        if self.last_region is None:
+            self.notify("沒有上次的範圍", "先手動框一次再用這個功能。",
+                        QSystemTrayIcon.Warning)
+            return
+        self.start_capture(False, region=self.last_region)
+
+    def capture_active_window(self) -> None:
+        rect = winrects.active_window_rect()
+        if rect is None:
+            self.notify("找不到作用中視窗", "請改用一般框選。",
+                        QSystemTrayIcon.Warning)
+            return
+        self.start_capture(False, region=rect)
+
+    def _on_capture_cancelled(self, pixmap: QPixmap) -> None:
         self.overlay = None
+        # 誤按 Esc 也留一份，才不會整張截圖就這樣沒了
+        if self.cfg["record_cancelled"] and not pixmap.isNull():
+            self.history.add(pixmap)
+            self._refresh_history_dialog()
 
     def _on_capture_finished(self, pixmap: QPixmap, action: str, geometry: QRect) -> None:
         self.overlay = None
+        self.last_region = QRect(geometry)
+        pixmap = effects.apply(pixmap, int(self.cfg["round_corners"]),
+                               bool(self.cfg["drop_shadow"]),
+                               bool(self.cfg["add_border"]))
         if action == "save":
             self.save_pixmap(pixmap)
             return
@@ -249,6 +292,25 @@ class SnipTagApp(QObject):
         for window in self.pins:
             if window.click_through:
                 window.set_click_through(False)
+
+    def toggle_pins_hidden(self) -> None:
+        """一鍵把所有釘圖收起來 / 放回去（要截圖桌面時很好用）。"""
+        if not self.pins:
+            return
+        self.pins_hidden = not self.pins_hidden
+        for window in self.pins:
+            window.setVisible(not self.pins_hidden)
+
+    def solo_pin(self, keep: PinWindow) -> None:
+        """只顯示這一張，其餘暫時收起來；再按一次全部放回來。"""
+        others = [w for w in self.pins if w is not keep]
+        if any(not w.isVisible() for w in others):
+            for window in others:
+                window.setVisible(True)
+            self.pins_hidden = False
+            return
+        for window in others:
+            window.setVisible(False)
 
     # --- 歷史 -----------------------------------------------------
     def show_history(self) -> None:

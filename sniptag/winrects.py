@@ -101,6 +101,24 @@ def list_window_groups() -> list[list[Rect]]:
     return groups
 
 
+def active_window_rect() -> Rect | None:
+    """目前作用中視窗的範圍（實體像素）。"""
+    if sys.platform != "win32":
+        return None
+    try:
+        user32 = ctypes.windll.user32
+        dwmapi = ctypes.windll.dwmapi
+    except (AttributeError, OSError):
+        return None
+    hwnd = user32.GetForegroundWindow()
+    if not hwnd:
+        return None
+    frame = _frame_rect(hwnd, user32, dwmapi)
+    if frame is None or frame[2] - frame[0] < MIN_SIDE:
+        return None
+    return frame
+
+
 def list_window_rects() -> list[Rect]:
     """只要最上層視窗的範圍（保留給不需要子區塊的呼叫端）。"""
     return [group[0] for group in list_window_groups()]

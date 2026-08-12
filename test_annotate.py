@@ -289,6 +289,68 @@ def main() -> None:
           f"方塊之間顏色有差異，確實蓋在有內容的地方（{len(block_colors)} 色）")
     probe.close()
 
+    print("樣式變化真的畫出不一樣的東西")
+
+    def render_with(shape) -> bytes:
+        probe = new_overlay(shot)
+        probe.layer.add(shape)
+        image = probe.render_result().toImage()
+        probe.close()
+        return image.constBits().tobytes()
+
+    base = annotate.Style(color="#f5423f", width=4)
+    corners = QRect(200, 200, 160, 90)
+    solid = render_with(annotate.RectShape(corners.topLeft(), corners.bottomRight(),
+                                           annotate.Style("#f5423f", 4)))
+    dashed = render_with(annotate.RectShape(corners.topLeft(), corners.bottomRight(),
+                                            annotate.Style("#f5423f", 4, dashed=True)))
+    rounded = render_with(annotate.RectShape(corners.topLeft(), corners.bottomRight(),
+                                             annotate.Style("#f5423f", 4, rounded=True)))
+    check(solid != dashed, "虛線與實線輸出不同")
+    check(solid != rounded, "圓角與直角輸出不同")
+    check(dashed != rounded, "虛線與圓角也不同")
+
+    single = render_with(annotate.ArrowShape(QPoint(200, 200), QPoint(380, 320),
+                                             annotate.Style("#f5423f", 4)))
+    double = render_with(annotate.ArrowShape(
+        QPoint(200, 200), QPoint(380, 320),
+        annotate.Style("#f5423f", 4, both_ends=True)))
+    check(single != double, "雙向箭頭與單向不同")
+
+    plain_text = render_with(annotate.TextShape(QPoint(200, 200), "測試", base))
+    boxed_text = render_with(annotate.TextShape(
+        QPoint(200, 200), "測試", annotate.Style("#f5423f", 4, filled=True)))
+    check(plain_text != boxed_text, "文字加底色與不加不同")
+
+    print("橡皮擦")
+    probe = new_overlay(shot)
+    keep = annotate.RectShape(QPoint(200, 200), QPoint(260, 240), base)
+    wipe = annotate.RectShape(QPoint(400, 380), QPoint(460, 420), base)
+    probe.layer.add(keep)
+    probe.layer.add(wipe)
+    check(not probe.layer.erase_at(QPoint(330, 300)), "空白處擦不到東西")
+    check(probe.layer.erase_at(QPoint(400, 380)), "擦到圖形回傳 True")
+    check(probe.layer.shapes == [keep], "只擦掉碰到的那個")
+    probe.layer.redo()
+    check(len(probe.layer) == 2, "Ctrl+Z 可以把擦掉的救回來")
+    probe.close()
+
+    print("每個工具記住自己的顏色")
+    probe = new_overlay(shot)
+    probe.set_tool("rect")
+    probe.set_color("#2ecc71")
+    probe.set_tool("marker")
+    check(probe.style.color == "#ff9f1c", "切到螢光筆用回螢光筆的顏色")
+    probe.set_tool("rect")
+    check(probe.style.color == "#2ecc71", "切回矩形記得剛才選的綠色")
+    probe.close()
+
+    print("Shift 拖曳成正方形")
+    square = Overlay._square_from(QPoint(100, 100), QPoint(240, 180))
+    check(square == QPoint(240, 240), "往右下：邊長取較長的那一邊")
+    square = Overlay._square_from(QPoint(100, 100), QPoint(20, 60))
+    check(square == QPoint(20, 20), "往左上也對稱")
+
     print("色彩格式")
     red = QColor(245, 66, 63)
     check(annotate.format_color(red, "HEX") == "#F5423F", "HEX")

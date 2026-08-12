@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtGui import (
-    QAction, QColor, QGuiApplication, QPainter, QPen, QPixmap, QTransform,
+    QAction, QColor, QGuiApplication, QImage, QPainter, QPen, QPixmap, QTransform,
 )
 from PySide6.QtWidgets import QMenu, QWidget
 
@@ -31,7 +31,12 @@ class PinWindow(QWidget):
         self.source = pixmap
         self.scale = 1.0
         self.rotation = 0
+        self.mirrored = False
+        self.flipped = False
+        self.grayscale = False
+        self.inverted = False
         self.click_through = False
+        self.topmost = True
         self._drag_offset: QPoint | None = None
 
         self._apply_size()
@@ -39,12 +44,26 @@ class PinWindow(QWidget):
 
     # --- 外觀 -----------------------------------------------------
     def _rebuild_source(self) -> None:
-        if self.rotation % 360 == 0:
-            self.source = self.original
-            return
-        transform = QTransform().rotate(self.rotation)
-        self.source = self.original.transformed(transform, Qt.SmoothTransformation)
-        self.source.setDevicePixelRatio(self.original.devicePixelRatio())
+        dpr = self.original.devicePixelRatio()
+        if self.grayscale or self.inverted:
+            image = self.original.toImage()
+            if self.grayscale:
+                image = image.convertToFormat(QImage.Format_Grayscale8)
+            if self.inverted:
+                image = image.convertToFormat(QImage.Format_ARGB32)
+                image.invertPixels(QImage.InvertRgb)
+            result = QPixmap.fromImage(image)
+        else:
+            result = QPixmap(self.original)
+
+        transform = QTransform()
+        transform.rotate(self.rotation)
+        transform.scale(-1 if self.mirrored else 1, -1 if self.flipped else 1)
+        if not transform.isIdentity():
+            result = result.transformed(transform, Qt.SmoothTransformation)
+
+        result.setDevicePixelRatio(dpr)
+        self.source = result
 
     def _logical_size(self) -> tuple[int, int]:
         dpr = self.source.devicePixelRatio() or 1.0
@@ -70,6 +89,8 @@ class PinWindow(QWidget):
         color = QColor(45, 127, 249, 200)
         if self.click_through:
             color = QColor(255, 176, 32, 220)   # 穿透中：換個顏色提示
+        elif not self.topmost:
+            color = QColor(140, 148, 160, 200)  # 未置頂：灰邊
         painter.setPen(QPen(color, 1))
         painter.setBrush(Qt.NoBrush)
         painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
@@ -83,6 +104,21 @@ class PinWindow(QWidget):
         self.rotation = (self.rotation + degrees) % 360
         self._rebuild_source()
         self._resize_around_center()
+
+    def toggle(self, attribute: str) -> None:
+        """切換鏡像 / 上下翻轉 / 灰階 / 反相。"""
+        setattr(self, attribute, not getattr(self, attribute))
+        self._rebuild_source()
+        self._resize_around_center()
+
+    def set_topmost(self, enabled: bool) -> None:
+        self.topmost = enabled
+        self.setWindowFlag(Qt.WindowStaysOnTopHint, enabled)
+        self.show()
+        self.update()
+
+    def toggle_topmost(self) -> None:
+        self.set_topmost(not self.topmost)
 
     def set_click_through(self, enabled: bool) -> None:
         """滑鼠穿透：圖還在最上層，但點擊會穿到底下的視窗。"""
@@ -98,6 +134,8 @@ class PinWindow(QWidget):
     def reset(self) -> None:
         self.scale = 1.0
         self.rotation = 0
+        self.mirrored = self.flipped = False
+        self.grayscale = self.inverted = False
         self.setWindowOpacity(1.0)
         self._rebuild_source()
         self._resize_around_center()
@@ -158,8 +196,20 @@ class PinWindow(QWidget):
             self.rotate(-90)
         elif key == Qt.Key_2:
             self.rotate(90)
+        elif key == Qt.Key_3:
+            self.toggle("mirrored")
+        elif key == Qt.Key_4:
+            self.toggle("flipped")
+        elif key == Qt.Key_5:
+            self.toggle("grayscale")
+        elif key == Qt.Key_6:
+            self.toggle("inverted")
         elif key == Qt.Key_X:
             self.toggle_click_through()
+        elif key == Qt.Key_T:
+            self.toggle_topmost()
+        elif key == Qt.Key_D:
+            self.app.solo_pin(self)
         else:
             super().keyPressEvent(event)
 
@@ -173,22 +223,39 @@ class PinWindow(QWidget):
             None,
             ("向左旋轉  1", lambda: self.rotate(-90)),
             ("向右旋轉  2", lambda: self.rotate(90)),
+            ("水平鏡像  3", lambda: self.toggle("mirrored")),
+            ("垂直翻轉  4", lambda: self.toggle("flipped")),
+            ("灰階  5", lambda: self.toggle("grayscale")),
+            ("反相  6", lambda: self.toggle("inverted")),
+            None,
             ("放大  +", lambda: self.zoom(ZOOM_STEP)),
             ("縮小  -", lambda: self.zoom(1 / ZOOM_STEP)),
             ("還原  Ctrl+0", self.reset),
             None,
+            ("維持最上層  T", self.toggle_topmost),
             ("滑鼠穿透  X", self.toggle_click_through),
+            ("只顯示這張  D", lambda: self.app.solo_pin(self)),
             ("關閉", self.close),
         ]
+        checkable = {
+            "滑鼠穿透": lambda: self.click_through,
+            "維持最上層": lambda: self.topmost,
+            "灰階": lambda: self.grayscale,
+            "反相": lambda: self.inverted,
+            "水平鏡像": lambda: self.mirrored,
+            "垂直翻轉": lambda: self.flipped,
+        }
         for entry in entries:
             if entry is None:
                 menu.addSeparator()
                 continue
             text, slot = entry
             action = QAction(text, menu)
-            if text.startswith("滑鼠穿透"):
-                action.setCheckable(True)
-                action.setChecked(self.click_through)
+            for prefix, state in checkable.items():
+                if text.startswith(prefix):
+                    action.setCheckable(True)
+                    action.setChecked(state())
+                    break
             action.triggered.connect(slot)
             menu.addAction(action)
         menu.exec(event.globalPos())
