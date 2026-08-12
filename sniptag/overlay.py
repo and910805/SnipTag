@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import copy
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, Signal
 from PySide6.QtGui import (
     QColor, QCursor, QFont, QFontMetrics, QGuiApplication, QImage, QPainter, QPen,
     QPixmap, QRegion,
@@ -44,6 +44,7 @@ QPushButton#icon:disabled { background: transparent; }
 QPushButton#primary { background: #2d7ff9; color: white; font-weight: bold; }
 QPushButton#primary:hover { background: #4a92fb; }
 QLabel#name { color: #9fd18a; font-size: 12px; padding: 0 6px; }
+QLabel#hint { color: #cfd6e0; font-size: 12px; padding: 0 4px; }
 QFrame#sep { background: #3a3f47; }
 QLineEdit#inline {
     background: rgba(20, 22, 26, 220); color: white; border: 1px solid #2d7ff9;
@@ -68,6 +69,7 @@ class Toolbar(QWidget):
         self.setObjectName("toolbar")
         self.setStyleSheet(TOOLBAR_QSS)
         self.setCursor(Qt.ArrowCursor)
+        self._hints: dict[QWidget, str] = {}
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(8, 6, 8, 6)
@@ -106,6 +108,7 @@ class Toolbar(QWidget):
         self.custom_button = self._button("＋")
         self.custom_button.setFixedSize(20, 22)
         self.custom_button.setToolTip("自訂顏色")
+        self._register_hint(self.custom_button, "自訂顏色")
         bar.addWidget(self.custom_button)
         bar.addWidget(_separator())
 
@@ -131,6 +134,10 @@ class Toolbar(QWidget):
         self.name_label = QLabel(self)
         self.name_label.setObjectName("name")
         actions.addWidget(self.name_label)
+        # 自己畫的提示列：Qt 的 tooltip 會被全螢幕置頂的框選視窗蓋住
+        self.hint_label = QLabel(self)
+        self.hint_label.setObjectName("hint")
+        actions.addWidget(self.hint_label)
         actions.addStretch(1)
 
         self.buttons: dict[str, QPushButton] = {}
@@ -143,6 +150,7 @@ class Toolbar(QWidget):
         ):
             button = self._button(text)
             button.setToolTip(tip)
+            self._register_hint(button, tip)
             if primary:
                 button.setObjectName("primary")
             actions.addWidget(button)
@@ -166,12 +174,26 @@ class Toolbar(QWidget):
         button.setIconSize(QSize(toolicons.SIZE, toolicons.SIZE))
         button.setFixedSize(28, 26)
         button.setToolTip(f"{tip}\n{extra}" if extra else tip)
+        self._register_hint(button, tip)
         return button
+
+    def _register_hint(self, widget: QWidget, text: str) -> None:
+        """滑到哪就在工具列上寫出那是什麼功能。"""
+        self._hints[widget] = text
+        widget.installEventFilter(self)
+
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() == QEvent.Enter:
+            self.hint_label.setText(self._hints.get(watched, ""))
+        elif event.type() == QEvent.Leave:
+            self.hint_label.clear()
+        return False
 
     def _swatch(self, color: str) -> QPushButton:
         button = self._button("", checkable=True)
         button.setFixedSize(20, 20)
         button.setToolTip(color.upper())
+        self._register_hint(button, f"顏色 {color.upper()}")
         button.setStyleSheet(
             f"QPushButton {{ background: {color}; border: 2px solid #23262b;"
             f" border-radius: 10px; padding: 0; }}"
@@ -420,9 +442,13 @@ class Overlay(QWidget):
             self._paint_selected_marker(painter)
             self._paint_selection(painter, selection)
         elif self.hover_rect is not None:
+            # 加一層淡藍底：只有虛線的話貼在螢幕邊緣時幾乎看不見
+            frame = self.hover_rect.adjusted(0, 0, -1, -1)
+            painter.fillRect(frame, QColor(45, 127, 249, 38))
             painter.setPen(QPen(ACCENT, 2, Qt.DashLine))
             painter.setBrush(Qt.NoBrush)
-            painter.drawRect(self.hover_rect.adjusted(0, 0, -1, -1))
+            painter.drawRect(frame)
+            self._paint_hover_size(painter, frame)
             self._paint_hint(painter)
 
         if not self.settled:
@@ -457,8 +483,15 @@ class Overlay(QWidget):
             text = f"{text}　{self.flash}"
         self._draw_label(painter, text, selection.topLeft() + QPoint(0, -26))
 
+    def _paint_hover_size(self, painter: QPainter, frame: QRect) -> None:
+        dpr = self.shot.dpr_for(self._to_global(frame))
+        text = f"{round(frame.width() * dpr)} × {round(frame.height() * dpr)}"
+        if len(self.hierarchy) > 1:
+            text += f"　滾輪切換 {self.hierarchy_index + 1}/{len(self.hierarchy)}"
+        self._draw_label(painter, text, frame.topLeft() + QPoint(6, 6))
+
     def _paint_hint(self, painter: QPainter) -> None:
-        text = ("拖曳框選（Shift 正方形）　點擊選取視窗　滾輪切換範圍大小　"
+        text = ("拖曳框選（Shift 正方形）　點一下選取整個視窗　滾輪往下鑽進子區塊　"
                 "方向鍵微調　C 複製色碼　Ctrl+A 全螢幕　Esc 取消")
         metrics = QFontMetrics(self._label_font())
         position = QPoint(
@@ -557,12 +590,12 @@ class Overlay(QWidget):
         return None
 
     def _update_hover(self, pos: QPoint) -> None:
-        """取最上層那個視窗，把它的候選框由小到大排好，預設選最小的那個。"""
+        """取最上層那個視窗。預設框「整個視窗」，滾輪往下才鑽進子區塊。"""
         for group in self.window_groups:
             if not group[0].contains(pos):
                 continue
             inside = [rect for rect in group if rect.contains(pos)]
-            inside.sort(key=lambda r: r.width() * r.height())
+            inside.sort(key=lambda r: r.width() * r.height(), reverse=True)
             self.hierarchy = inside
             self.hierarchy_index = 0
             self.hover_rect = inside[0]
@@ -572,8 +605,8 @@ class Overlay(QWidget):
         self.hover_rect = None
 
     def wheelEvent(self, event) -> None:
-        """框選前用滾輪在「子區塊 ↔ 整個視窗」之間切換。"""
-        if self.settled or not self.hierarchy:
+        """框選前用滾輪在「整個視窗 ↔ 子區塊」之間切換：往下鑽細，往上放大。"""
+        if self.settled or len(self.hierarchy) < 2:
             return
         steps = 1 if event.angleDelta().y() < 0 else -1
         self.hierarchy_index = max(

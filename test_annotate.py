@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import sys
 
-from PySide6.QtCore import QPoint, QRect, Qt
+from PySide6.QtCore import QEvent, QPoint, QRect, Qt
 from PySide6.QtGui import QColor, QFont, QImage, QPainter
 from PySide6.QtWidgets import QApplication
 
@@ -350,6 +350,49 @@ def main() -> None:
     check(square == QPoint(240, 240), "往右下：邊長取較長的那一邊")
     square = Overlay._square_from(QPoint(100, 100), QPoint(20, 60))
     check(square == QPoint(20, 20), "往左上也對稱")
+
+    print("輔助框：預設框整個視窗，滾輪才鑽進子區塊")
+    probe = new_overlay(shot)
+    probe.settled = False
+    window = QRect(100, 100, 600, 400)
+    panel = QRect(150, 150, 200, 120)
+    button = QRect(160, 160, 60, 30)
+    probe.window_groups = [[window, panel, button]]
+    probe._update_hover(QPoint(180, 175))
+    check(probe.hover_rect == window, "預設是整個視窗，不是最小的那塊")
+    check(probe.hierarchy == [window, panel, button], "候選由大到小排好")
+    check(probe.hierarchy_index == 0, "從最外層開始")
+
+    probe.hierarchy_index = 1
+    probe.hover_rect = probe.hierarchy[1]
+    check(probe.hover_rect == panel, "往下一層是面板")
+
+    probe._update_hover(QPoint(900, 900))
+    check(probe.hover_rect is None, "游標離開所有視窗就沒有輔助框")
+    check(probe.hierarchy == [], "層級也清空")
+    probe.close()
+
+    print("工具列提示列（不靠 Qt tooltip）")
+    probe = new_overlay(shot)
+    probe._show_toolbar()
+    toolbar = probe.toolbar
+    check(toolbar.hint_label.text() == "", "一開始是空的")
+    target = toolbar.tool_buttons["mosaic"]
+    check(target in toolbar._hints, "圖示按鈕有登記說明")
+    toolbar.eventFilter(target, QEvent(QEvent.Enter))
+    check("馬賽克" in toolbar.hint_label.text(), "滑上去顯示功能名稱")
+    check("M" in toolbar.hint_label.text(), "而且帶著快捷鍵")
+    toolbar.eventFilter(target, QEvent(QEvent.Leave))
+    check(toolbar.hint_label.text() == "", "移開就清掉")
+
+    swatch = toolbar.color_buttons[annotate.PALETTE[0]]
+    toolbar.eventFilter(swatch, QEvent(QEvent.Enter))
+    check(annotate.PALETTE[0].upper() in toolbar.hint_label.text(),
+          "顏色鈕也會顯示色碼")
+    save_button = toolbar.buttons["save"]
+    toolbar.eventFilter(save_button, QEvent(QEvent.Enter))
+    check("存檔" in toolbar.hint_label.text(), "動作鈕也有說明")
+    probe.close()
 
     print("色彩格式")
     red = QColor(245, 66, 63)

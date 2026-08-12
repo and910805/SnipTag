@@ -326,8 +326,18 @@ def main() -> None:
 
     # 4. 視窗自動偵測：還沒拖曳，游標停在筆記視窗上
     overlay = DemoOverlay(shot, "週會_03.png", NOTES.center())
-    overlay.hover_rect = NOTES
+    overlay._update_hover(NOTES.center())
     save(overlay.grab(), "window-detect.png")
+    overlay.close()
+
+    # 4b. 工具列的提示列：滑到某個圖示上會寫出那是什麼
+    overlay = DemoOverlay(shot, "週會_03.png", QPoint(-1, -1))
+    overlay.selection = QRect(72, 186, 812, 364)
+    overlay.settled = True
+    overlay._show_toolbar()
+    overlay.toolbar.hint_label.setText("馬賽克　M")
+    overlay.toolbar.tool_buttons["mosaic"].setChecked(True)
+    save(overlay.grab(), "toolbar-hint.png")
     overlay.close()
 
     # 4. 釘圖：把兩塊裁切結果釘在桌面上
