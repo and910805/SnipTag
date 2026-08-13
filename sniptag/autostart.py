@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import ctypes
 import sys
 from pathlib import Path
 
@@ -14,8 +15,25 @@ RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 VALUE_NAME = "SnipTag"
 
 
+def is_packaged() -> bool:
+    """目前是否由 MSIX / Microsoft Store 套件身分啟動。"""
+    if sys.platform != "win32":
+        return False
+    try:
+        length = ctypes.c_uint32(0)
+        result = ctypes.windll.kernel32.GetCurrentPackageFullName(
+            ctypes.byref(length), None
+        )
+        # ERROR_INSUFFICIENT_BUFFER 表示 Windows 找到了套件名稱。
+        return result == 122
+    except (AttributeError, OSError):
+        return False
+
+
 def available() -> bool:
-    return sys.platform == "win32"
+    # Store 版改由 AppxManifest 的 windows.startupTask 管理，不能再把
+    # 版本化的 WindowsApps 實體路徑寫入 HKCU Run。
+    return sys.platform == "win32" and not is_packaged()
 
 
 def launch_command() -> str:
@@ -41,6 +59,10 @@ def _winreg():
 
 
 def is_enabled(value_name: str = VALUE_NAME) -> bool:
+    if is_packaged():
+        # MSIX manifest 首次啟動時會註冊已啟用的 StartupTask；使用者仍可
+        # 在 Windows「啟動應用程式」或工作管理員中停用。
+        return True
     if not available():
         return False
     winreg = _winreg()

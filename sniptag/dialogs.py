@@ -173,7 +173,13 @@ class SettingsDialog(QDialog):
 
         self.autostart_check = QCheckBox("開機時自動啟動（常駐系統匣）", self)
         self.autostart_check.setChecked(autostart.is_enabled())
-        if autostart.available():
+        if autostart.is_packaged():
+            self.autostart_check.setEnabled(False)
+            self.autostart_check.setToolTip(
+                "Microsoft Store 版由 Windows 管理。\n"
+                "若要停用，請到工作管理員的「啟動應用程式」頁面。"
+            )
+        elif autostart.available():
             self.autostart_check.setToolTip(
                 "寫入目前使用者的登錄檔啟動項，不需要系統管理員權限。\n"
                 f"執行的命令：{autostart.launch_command()}")
