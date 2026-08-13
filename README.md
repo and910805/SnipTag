@@ -599,6 +599,13 @@ SnipTag 啟動時會跳通知告訴你哪幾個熱鍵註冊失敗，到「設定
 
 ---
 
+## Privacy
+
+SnipTag 在本機處理截圖、剪貼簿內容與設定，不包含遙測或使用情形分析。
+詳情請參閱 [Privacy Policy / 隱私權政策](PRIVACY.md)。
+
+---
+
 ## License
 
 This project is licensed under the [MIT License](LICENSE).

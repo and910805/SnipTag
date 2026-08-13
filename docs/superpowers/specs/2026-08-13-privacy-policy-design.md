@@ -1,6 +1,6 @@
 # SnipTag Privacy Policy Design
 
-Date: 2026-08-13  
+Date: 2026-08-13
 Status: Approved for implementation
 
 ## Goal
@@ -59,4 +59,3 @@ SignPath Foundation application.
 - Confirm that the README link resolves to the repository privacy file.
 - Re-run a source search for network and telemetry libraries before publishing.
 - Run `git diff --check` and verify that no application code changed.
-
