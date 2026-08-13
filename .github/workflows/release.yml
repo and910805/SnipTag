@@ -84,7 +84,24 @@ jobs:
 
           完整說明請看 README：https://github.com/__REPO__#readme
 
-          ## 注意
+          ## Code signing policy
+
+          > **Application status: pending.** Current release binaries remain unsigned until
+          > SignPath approves this project and the signing pipeline is enabled.
+
+          After approval, Windows release binaries will use:
+
+          > Free code signing provided by [SignPath.io](https://signpath.io/), certificate by
+          > [SignPath Foundation](https://signpath.org/).
+
+          - Committers and reviewers: [@and910805](https://github.com/and910805)
+          - Approvers: [@and910805](https://github.com/and910805)
+
+          Every external contribution is reviewed before merge, and every release signing
+          request must be manually approved by the project maintainer.
+
+          Privacy: This program will not transfer any information to other networked systems
+          unless specifically requested by the user or the person installing or operating it.
 
           ## 檔案驗證
 

@@ -481,18 +481,32 @@ pyinstaller --noconsole --onefile --name SnipTag run.py
 
 ## 關於「不明的發行者」
 
-下載下來的 `SnipTag.exe` **沒有程式碼簽章**，所以 Windows SmartScreen、
-Smart App Control 或防毒軟體可能會攔下來，說「不知道是誰開發的」。
+目前發布的 `SnipTag.exe` **尚未具有受信任的程式碼簽章**，所以 Windows
+SmartScreen、Smart App Control 或防毒軟體可能會攔下來，說「不知道是誰開發的」。
 
 exe 裡面有寫入完整的檔案內容資訊（產品名稱、版本、著作權、專案網址），
 右鍵 →「內容」→「詳細資料」看得到，但那只是**描述**，不是**證明** ——
 任何人都能填一樣的欄位，所以系統不會因此就信任它。
 
-### 為什麼不簽章
+### Code signing policy
 
-程式碼簽章憑證需要付費申請並驗證身分，而且從 2023 年起私鑰必須存放在
-硬體權杖或雲端簽章服務裡，不再能單純下載一個檔案。以個人專案來說這是一筆
-不小的固定成本，所以這個專案選擇不簽，改用其他方式讓你能驗證檔案。
+> **申請狀態：審核中。** 在 SignPath 核准且簽署流程正式接入前，Release 內的
+> 執行檔仍是未簽章版本，Windows 可能繼續顯示警告。
+
+核准後，Windows Release 將使用以下服務簽署：
+
+> Free code signing provided by [SignPath.io](https://signpath.io/), certificate by
+> [SignPath Foundation](https://signpath.org/).
+
+- Committers and reviewers: [@and910805](https://github.com/and910805)
+- Approvers: [@and910805](https://github.com/and910805)
+
+外部貢獻必須經過維護者審查後才會合併；每次正式 Release 的簽署請求也必須由
+維護者人工核准。只有由本專案公開原始碼與建置腳本，透過 GitHub Actions 產生的
+SnipTag 發佈成品可以送交簽署。
+
+**Privacy:** This program will not transfer any information to other networked systems
+unless specifically requested by the user or the person installing or operating it.
 
 ### 你可以怎麼確認這個檔案沒被動過手腳
 
