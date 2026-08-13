@@ -33,5 +33,6 @@ jobs:
           python test_history.py
           python test_hotkeys.py
           python test_autostart.py
+          python test_msix.py
           python test_effects.py
           python test_welcome.py

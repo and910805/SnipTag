@@ -35,11 +35,15 @@ jobs:
           python test_history.py
           python test_hotkeys.py
           python test_autostart.py
+          python test_msix.py
           python test_effects.py
           python test_welcome.py
 
       - name: 打包 exe
         run: python build.py
+
+      - name: 建立 Microsoft Store MSIX
+        run: python build_msix.py --skip-exe
 
       - name: 產生 SHA256
         shell: pwsh
@@ -55,6 +59,12 @@ jobs:
         with:
           name: SnipTag-exe
           path: dist/SnipTag.exe
+
+      - name: 保留 Store 上傳套件
+        uses: actions/upload-artifact@v4
+        with:
+          name: SnipTag-store-msix
+          path: dist/SnipTag_*_x64.msix
 
       - name: 發佈 Release
         if: startsWith(github.ref, 'refs/tags/')

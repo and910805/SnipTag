@@ -477,6 +477,29 @@ pip install pyinstaller
 pyinstaller --noconsole --onefile --name SnipTag run.py
 ```
 
+### 建立 Microsoft Store MSIX
+
+Partner Center 使用的套件身分已放在 `packaging/AppxManifest.xml.template`。
+執行下列指令會先建立 exe，再下載 Microsoft 官方 Windows SDK 建置工具，
+最後產生 `dist/SnipTag_<版本>_x64.msix`：
+
+```powershell
+pip install -r requirements.txt pyinstaller
+python build_msix.py
+```
+
+如果 `dist/SnipTag.exe` 已經建好，可以略過重複打包：
+
+```powershell
+python build_msix.py --skip-exe
+```
+
+產生的 MSIX 沒有本機簽章，僅用來上傳 Microsoft Partner Center；認證通過後，
+Microsoft Store 會重新簽署並提供安裝與自動更新。不要把 unsigned MSIX 當作一般下載檔發布。
+
+Store 版的開機啟動由 MSIX `windows.startupTask` 管理，不把版本化的
+`WindowsApps` 路徑寫進登錄檔。使用者可在工作管理員的「啟動應用程式」頁面停用。
+
 ---
 
 ## 關於「不明的發行者」
