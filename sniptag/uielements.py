@@ -9,6 +9,7 @@ EnumChildWindows 看不進 Chrome / Edge / Electron —— 對 Win32 來說
 """
 from __future__ import annotations
 
+import ctypes
 import sys
 
 Rect = tuple[int, int, int, int]
@@ -85,6 +86,63 @@ def hierarchy_at(x: int, y: int) -> list[Rect]:
         except Exception:
             break
     return rects
+
+
+class ProbeThrough:
+    """暫時讓一個視窗對命中測試透明。
+
+    截圖時整個螢幕蓋著我們自己的全螢幕框選視窗，ElementFromPoint 會打到
+    它而不是底下的瀏覽器。WS_EX_TRANSPARENT 要搭配 WS_EX_LAYERED 才會
+    影響命中測試（實測單獨設定無效），查完立刻還原。
+    """
+
+    GWL_EXSTYLE = -20
+    WS_EX_TRANSPARENT = 0x20
+    WS_EX_LAYERED = 0x80000
+    LWA_ALPHA = 0x2
+
+    def __init__(self, widget) -> None:
+        self._hwnd = None
+        self._old = None
+        if sys.platform == "win32":
+            try:
+                self._hwnd = int(widget.winId())
+            except Exception:
+                self._hwnd = None
+
+    def __enter__(self) -> "ProbeThrough":
+        if self._hwnd is None:
+            return self
+        try:
+            user32 = ctypes.windll.user32
+            get_long = getattr(user32, "GetWindowLongPtrW", user32.GetWindowLongW)
+            get_long.restype = ctypes.c_ssize_t
+            get_long.argtypes = [ctypes.c_void_p, ctypes.c_int]
+            set_long = getattr(user32, "SetWindowLongPtrW", user32.SetWindowLongW)
+            set_long.restype = ctypes.c_ssize_t
+            set_long.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_ssize_t]
+
+            self._old = get_long(self._hwnd, self.GWL_EXSTYLE)
+            set_long(self._hwnd, self.GWL_EXSTYLE,
+                     self._old | self.WS_EX_TRANSPARENT | self.WS_EX_LAYERED)
+            # 全不透明：視覺上完全沒有變化，只影響命中測試
+            user32.SetLayeredWindowAttributes(
+                ctypes.c_void_p(self._hwnd), 0, 255, self.LWA_ALPHA)
+        except Exception:
+            self._old = None
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        if self._hwnd is None or self._old is None:
+            return
+        try:
+            user32 = ctypes.windll.user32
+            set_long = getattr(user32, "SetWindowLongPtrW", user32.SetWindowLongW)
+            set_long.restype = ctypes.c_ssize_t
+            set_long.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_ssize_t]
+            set_long(self._hwnd, self.GWL_EXSTYLE, self._old)
+        except Exception:
+            pass
 
 
 def merge_into(hierarchy: list, extra: list, bounding) -> list:

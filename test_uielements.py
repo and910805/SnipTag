@@ -30,9 +30,8 @@ def main() -> None:
         left, top, right, bottom = rect
         check(right > left and bottom > top, f"矩形合法 {rect}")
         break   # 驗一個就夠
-    if len(rects) >= 2:
-        areas = [(r[2] - r[0]) * (r[3] - r[1]) for r in rects]
-        check(areas == sorted(areas), "由小到大排列")
+    # 注意：不驗「面積由小到大」—— 真實的 UIA 樹裡，捲動容器的裁切矩形
+    # 可能比子元素還小，順序交給 merge_into 排序。
     check(uielements.hierarchy_at(-99999, -99999) == [] or True,
           "亂給座標也不會爆炸")
 
@@ -55,6 +54,41 @@ def main() -> None:
     tiny = QRect(200, 200, 8, 8)
     merged = uielements.merge_into(hierarchy, [tiny], window)
     check(merged == [window, panel], "太小的元素（游標等級）不收")
+
+    print("打穿自己的視窗（ProbeThrough）")
+    if sys.platform == "win32":
+        import ctypes
+
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QWidget
+
+        cover = QWidget(None)
+        cover.setWindowFlags(Qt.Window | Qt.FramelessWindowHint
+                             | Qt.WindowStaysOnTopHint)
+        cover.setGeometry(0, 0, 600, 400)
+        cover.show()
+        app.processEvents()
+
+        user32 = ctypes.windll.user32
+        get_long = getattr(user32, "GetWindowLongPtrW", user32.GetWindowLongW)
+        get_long.restype = ctypes.c_ssize_t
+        get_long.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        hwnd = int(cover.winId())
+        before = get_long(hwnd, uielements.ProbeThrough.GWL_EXSTYLE)
+
+        with uielements.ProbeThrough(cover):
+            during = get_long(hwnd, uielements.ProbeThrough.GWL_EXSTYLE)
+            uielements.hierarchy_at(300, 200)   # 不能爆炸
+        after = get_long(hwnd, uielements.ProbeThrough.GWL_EXSTYLE)
+
+        check(bool(during & uielements.ProbeThrough.WS_EX_TRANSPARENT),
+              "查詢期間視窗對命中測試透明")
+        check(bool(during & uielements.ProbeThrough.WS_EX_LAYERED),
+              "而且是 layered（缺一個就打不穿）")
+        check(after == before, "查完樣式完整還原")
+        cover.close()
+    else:
+        print("  （非 Windows，略過）")
 
     print("\n全部通過。")
     del app

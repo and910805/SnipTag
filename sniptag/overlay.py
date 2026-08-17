@@ -275,6 +275,9 @@ class Overlay(QWidget):
         self._uia_timer.setSingleShot(True)
         self._uia_timer.setInterval(130)
         self._uia_timer.timeout.connect(self._probe_elements)
+        # 查到的元素以「所屬視窗」為單位快取：滑鼠抖一下不會前功盡棄
+        self._uia_cache_bound: QRect | None = None
+        self._uia_cache: list[QRect] = []
 
         self.toolbar = Toolbar(self)
         self.toolbar.hide()
@@ -602,6 +605,11 @@ class Overlay(QWidget):
                 continue
             inside = [rect for rect in group if rect.contains(pos)]
             inside.sort(key=lambda r: r.width() * r.height(), reverse=True)
+            if self._uia_cache_bound == group[0]:
+                # 之前查過這個視窗：把游標下的快取元素併回來
+                inside = uielements.merge_into(
+                    inside, [r for r in self._uia_cache if r.contains(pos)],
+                    group[0])
             self.hierarchy = inside
             self.hierarchy_index = 0
             self.hover_rect = inside[0]
@@ -625,18 +633,27 @@ class Overlay(QWidget):
             return
         monitor = self.shot.monitor_at(pos + self.origin)
         physical = monitor.to_physical(pos + self.origin)
-        found = uielements.hierarchy_at(physical.x(), physical.y())
+        # 框選視窗蓋著整個螢幕，要先讓它對命中測試透明，UIA 才打得到底下
+        with uielements.ProbeThrough(self):
+            found = uielements.hierarchy_at(physical.x(), physical.y())
         if not found:
             return
         logical = [
             self.shot.physical_rect_to_logical(*rect).translated(-self.origin)
             for rect in found
         ]
+        bound = self.hierarchy[0]
+        fresh = [r for r in logical if r.contains(pos)]     # 只收游標底下的
+        if self._uia_cache_bound == bound:
+            known = {(r.x(), r.y(), r.width(), r.height()) for r in self._uia_cache}
+            self._uia_cache.extend(
+                r for r in fresh
+                if (r.x(), r.y(), r.width(), r.height()) not in known)
+        else:
+            self._uia_cache_bound = QRect(bound)
+            self._uia_cache = fresh
         keep = self.hierarchy[self.hierarchy_index]
-        self.hierarchy = uielements.merge_into(
-            self.hierarchy,
-            [r for r in logical if r.contains(pos)],   # 只收游標底下的
-            self.hierarchy[0])
+        self.hierarchy = uielements.merge_into(self.hierarchy, fresh, bound)
         # 使用者已用滾輪選了某一層的話，盡量停在原地
         try:
             self.hierarchy_index = self.hierarchy.index(keep)
