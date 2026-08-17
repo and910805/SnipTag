@@ -60,45 +60,47 @@ class SnipTagApp(QObject):
         menu.addAction(self.topic_action)
         menu.addSeparator()
 
-        entries = [
-            (f"框選截圖\t{self.cfg['hotkey_capture']}", lambda: self.start_capture(False)),
-            (f"快速截圖存檔\t{self.cfg['hotkey_quickshot']}", lambda: self.start_capture(True)),
-            (f"重複上次的範圍\t{self.cfg['hotkey_repeat']}", self.repeat_last_capture),
-            ("擷取作用中視窗", self.capture_active_window),
-            ("延時 3 秒截圖", lambda: self.start_delayed_capture(3)),
-            ("延時 5 秒截圖", lambda: self.start_delayed_capture(5)),
-            ("滾動截圖（長網頁）…", self.start_scroll_capture),
-            None,
-            (f"貼上為釘圖\t{self.cfg['hotkey_pin']}", self.paste_pin),
-            (f"隱藏／顯示所有釘圖\t{self.cfg['hotkey_hide_pins']}",
-             self.toggle_pins_hidden),
-            None,
-            (f"設定主題…\t{self.cfg['hotkey_topic']}", self.change_topic),
-            ("截圖歷史…", self.show_history),
-            ("開啟存檔資料夾", self.open_folder),
-            None,
-            ("解除所有滑鼠穿透", self.clear_click_through),
-            (f"關閉所有釘圖\t{self.cfg['hotkey_close_pins']}", self.close_all_pins),
-            None,
-            # 開機自動啟動直接放選單上，不用進設定視窗找
-            ("開機時自動啟動", self.set_autostart, "autostart"),
-            ("使用教學…", self.show_welcome),
-            ("設定…", self.open_settings),
-            ("結束", self.quit),
-        ]
-        self.autostart_action: QAction | None = None
-        for entry in entries:
-            if entry is None:
-                menu.addSeparator()
-                continue
-            text, slot = entry[0], entry[1]
-            action = QAction(text, menu)
-            if len(entry) > 2 and entry[2] == "autostart":
-                action.setCheckable(True)
-                action.setEnabled(autostart.available())
-                self.autostart_action = action
+        def add(target: QMenu, text: str, slot) -> QAction:
+            action = QAction(text, target)
             action.triggered.connect(slot)
-            menu.addAction(action)
+            target.addAction(action)
+            return action
+
+        # 第一層只放天天用的；變化型收進子選單，掃一眼就找得到重點
+        add(menu, f"框選截圖\t{self.cfg['hotkey_capture']}",
+            lambda: self.start_capture(False))
+        add(menu, f"快速截圖存檔\t{self.cfg['hotkey_quickshot']}",
+            lambda: self.start_capture(True))
+        add(menu, "滾動截圖（長網頁）…", self.start_scroll_capture)
+
+        more = menu.addMenu("更多截圖方式")
+        add(more, f"重複上次的範圍\t{self.cfg['hotkey_repeat']}",
+            self.repeat_last_capture)
+        add(more, "擷取作用中視窗", self.capture_active_window)
+        add(more, "延時 3 秒截圖", lambda: self.start_delayed_capture(3))
+        add(more, "延時 5 秒截圖", lambda: self.start_delayed_capture(5))
+        menu.addSeparator()
+
+        add(menu, f"設定主題…\t{self.cfg['hotkey_topic']}", self.change_topic)
+        add(menu, "截圖歷史…", self.show_history)
+        add(menu, "開啟存檔資料夾", self.open_folder)
+        menu.addSeparator()
+
+        pins = menu.addMenu("釘圖")
+        add(pins, f"貼上為釘圖\t{self.cfg['hotkey_pin']}", self.paste_pin)
+        add(pins, f"隱藏／顯示全部\t{self.cfg['hotkey_hide_pins']}",
+            self.toggle_pins_hidden)
+        add(pins, f"關閉全部\t{self.cfg['hotkey_close_pins']}", self.close_all_pins)
+        add(pins, "解除所有滑鼠穿透", self.clear_click_through)
+        menu.addSeparator()
+
+        # 開機自動啟動直接放選單上，不用進設定視窗找
+        self.autostart_action = add(menu, "開機時自動啟動", self.set_autostart)
+        self.autostart_action.setCheckable(True)
+        self.autostart_action.setEnabled(autostart.available())
+        add(menu, "使用教學…", self.show_welcome)
+        add(menu, "設定…", self.open_settings)
+        add(menu, "結束", self.quit)
 
         menu.aboutToShow.connect(self._refresh_menu_state)
         return menu
