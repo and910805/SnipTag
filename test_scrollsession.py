@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import sys
 
-from PySide6.QtCore import QRect
+from PySide6.QtCore import QRect, Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication
 
 from sniptag import scrollsession
@@ -95,6 +96,28 @@ def main() -> None:
     session.finish()
     check(len(app.saved) == 0, "沒有內容就不存")
     check(any("沒有擷取到" in n for n in app.notices), "但會告訴使用者")
+
+    print("擷取範圍外框")
+    app = FakeApp()
+    region = QRect(50, 50, WIDTH, VIEW)
+    session = new_session(app, [
+        frame_at(article, 0),
+        frame_at(article, 1200),     # 接不上
+        frame_at(article, 80),       # 接上
+    ])
+    marker = session.frame_marker
+    b = marker.BORDER
+    check(marker.geometry() == region.adjusted(-b, -b, b, b),
+          "外框貼在區域外側，不遮內容")
+    check(bool(marker.windowFlags() & Qt.WindowTransparentForInput),
+          "滑鼠事件穿透（滾輪捲得動底下的視窗）")
+    check(marker.color == QColor(marker.NORMAL), "平常是藍色")
+    session._tick()
+    session._tick()
+    check(marker.color == QColor(marker.WARNING), "接不上 -> 轉橘色")
+    session._tick()
+    check(marker.color == QColor(marker.NORMAL), "接回來 -> 恢復藍色")
+    session.cancel()
 
     print("超過長度上限自動完成")
     app = FakeApp()

@@ -78,7 +78,7 @@ class SnipTagApp(QObject):
             ("開啟存檔資料夾", self.open_folder),
             None,
             ("解除所有滑鼠穿透", self.clear_click_through),
-            ("關閉所有釘圖", self.close_all_pins),
+            (f"關閉所有釘圖\t{self.cfg['hotkey_close_pins']}", self.close_all_pins),
             None,
             # 開機自動啟動直接放選單上，不用進設定視窗找
             ("開機時自動啟動", self.set_autostart, "autostart"),
@@ -157,6 +157,7 @@ class SnipTagApp(QObject):
         self.hotkeys.register(self.cfg["hotkey_topic"], self.change_topic)
         self.hotkeys.register(self.cfg["hotkey_repeat"], self.repeat_last_capture)
         self.hotkeys.register(self.cfg["hotkey_hide_pins"], self.toggle_pins_hidden)
+        self.hotkeys.register(self.cfg["hotkey_close_pins"], self.close_all_pins)
 
     def reload_hotkeys(self, announce: bool = False) -> None:
         """改完設定立即套用，不需要重新啟動。"""

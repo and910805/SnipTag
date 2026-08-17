@@ -12,7 +12,7 @@ import ctypes
 import sys
 
 from PySide6.QtCore import QRect, Qt, QTimer
-from PySide6.QtGui import QGuiApplication, QPixmap
+from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from . import screens, scroll
@@ -36,6 +36,52 @@ QPushButton#primary:hover { background: #4a92fb; }
 """
 
 
+def _exclude_from_capture(widget: QWidget) -> None:
+    """把視窗從螢幕擷取中排除，才不會被拍進長圖裡。"""
+    if sys.platform != "win32":
+        return
+    try:
+        ctypes.windll.user32.SetWindowDisplayAffinity(
+            int(widget.winId()), WDA_EXCLUDEFROMCAPTURE)
+    except (AttributeError, OSError):
+        pass    # 舊版 Windows 沒有這個功能
+
+
+class RegionFrame(QWidget):
+    """捲動期間標示擷取範圍的外框。滑鼠事件完全穿透，滾輪照常捲底下的視窗。"""
+
+    BORDER = 3
+    NORMAL = "#2d7ff9"
+    WARNING = "#ffb020"
+
+    def __init__(self, region: QRect) -> None:
+        super().__init__(None)
+        self.setWindowFlags(
+            Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+            | Qt.WindowTransparentForInput | Qt.NoDropShadowWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.color = QColor(self.NORMAL)
+        # 框畫在區域外側，內容一個像素都不遮
+        b = self.BORDER
+        self.setGeometry(region.adjusted(-b, -b, b, b))
+        _exclude_from_capture(self)
+
+    def set_warning(self, warning: bool) -> None:
+        self.color = QColor(self.WARNING if warning else self.NORMAL)
+        self.update()
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        pen = QPen(self.color, self.BORDER)
+        pen.setJoinStyle(Qt.MiterJoin)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        inset = self.BORDER // 2
+        painter.drawRect(self.rect().adjusted(inset, inset, -inset - 1, -inset - 1))
+
+
 class ScrollSession(QWidget):
     """一次滾動截圖。結束時把長圖交回給 app。"""
 
@@ -55,6 +101,8 @@ class ScrollSession(QWidget):
         self._finished = False
         self._seen_rejected = 0
         self._seen_segments = 0
+
+        self.frame_marker = RegionFrame(self.region)
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
@@ -87,19 +135,9 @@ class ScrollSession(QWidget):
         buttons.addWidget(cancel_button)
         layout.addLayout(buttons)
 
-        self._exclude_from_capture()
+        _exclude_from_capture(self)
 
     # --- 視窗行為 -------------------------------------------------
-    def _exclude_from_capture(self) -> None:
-        """把這個小視窗從螢幕擷取中排除，才不會被拍進長圖裡。"""
-        if sys.platform != "win32":
-            return
-        try:
-            ctypes.windll.user32.SetWindowDisplayAffinity(
-                int(self.winId()), WDA_EXCLUDEFROMCAPTURE)
-        except (AttributeError, OSError):
-            pass    # 舊版 Windows 沒有這個功能；_place 會盡量放在區域外
-
     def _place(self) -> None:
         """優先放在框選區域外面，滾輪才不會捲到這個視窗上。"""
         self.adjustSize()
@@ -121,6 +159,7 @@ class ScrollSession(QWidget):
 
     def start(self) -> None:
         self._place()
+        self.frame_marker.show()    # 捲動期間讓使用者看得到擷取範圍在哪
         self.show()
         self.timer.start(TICK_MS)
 
@@ -162,8 +201,10 @@ class ScrollSession(QWidget):
             self._seen_segments = len(self.stitcher)
             self.warn_label.setText("這一段接不上 —— 往回捲一點，再慢慢往下捲。")
             self.warn_label.show()
+            self.frame_marker.set_warning(True)
         elif len(self.stitcher) > self._seen_segments:
             self.warn_label.hide()
+            self.frame_marker.set_warning(False)
 
     # --- 收尾 -----------------------------------------------------
     def finish(self) -> None:
@@ -189,5 +230,6 @@ class ScrollSession(QWidget):
         self._close()
 
     def _close(self) -> None:
+        self.frame_marker.close()
         self.app.forget_scroll_session(self)
         self.close()

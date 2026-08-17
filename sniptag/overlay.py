@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import copy
 
-from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor, QCursor, QFont, QFontMetrics, QGuiApplication, QImage, QPainter, QPen,
     QPixmap, QRegion,
@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import annotate, toolicons, winrects
+from . import annotate, toolicons, uielements, winrects
 from .screens import DesktopShot
 
 ACCENT = QColor("#2d7ff9")
@@ -269,6 +269,12 @@ class Overlay(QWidget):
         self.setGeometry(shot.logical_geometry)
         self.window_groups = self._logical_window_groups()
         self.hover_rect: QRect | None = None
+
+        # 網頁元素偵測（UIA）很花時間，游標停下來 130ms 才查一次
+        self._uia_timer = QTimer(self)
+        self._uia_timer.setSingleShot(True)
+        self._uia_timer.setInterval(130)
+        self._uia_timer.timeout.connect(self._probe_elements)
 
         self.toolbar = Toolbar(self)
         self.toolbar.hide()
@@ -599,10 +605,45 @@ class Overlay(QWidget):
             self.hierarchy = inside
             self.hierarchy_index = 0
             self.hover_rect = inside[0]
+            self._uia_timer.start()     # 停下來再去問網頁裡有什麼元素
             return
         self.hierarchy = []
         self.hierarchy_index = 0
         self.hover_rect = None
+        self._uia_timer.stop()
+
+    def _probe_elements(self) -> None:
+        """游標停頓後，用 UIA 把網頁 / 應用程式內的元素併進候選清單。
+
+        EnumChildWindows 看不進瀏覽器，這裡補上文章區塊、圖片這類元素，
+        讓「點一下」和滾輪切換可以精準到網頁內容，而不是只有整個視窗。
+        """
+        if self.settled or not self.hierarchy:
+            return
+        pos = self._cursor_pos()
+        if not self.rect().contains(pos) or self.mode is not None:
+            return
+        monitor = self.shot.monitor_at(pos + self.origin)
+        physical = monitor.to_physical(pos + self.origin)
+        found = uielements.hierarchy_at(physical.x(), physical.y())
+        if not found:
+            return
+        logical = [
+            self.shot.physical_rect_to_logical(*rect).translated(-self.origin)
+            for rect in found
+        ]
+        keep = self.hierarchy[self.hierarchy_index]
+        self.hierarchy = uielements.merge_into(
+            self.hierarchy,
+            [r for r in logical if r.contains(pos)],   # 只收游標底下的
+            self.hierarchy[0])
+        # 使用者已用滾輪選了某一層的話，盡量停在原地
+        try:
+            self.hierarchy_index = self.hierarchy.index(keep)
+        except ValueError:
+            self.hierarchy_index = 0
+        self.hover_rect = self.hierarchy[self.hierarchy_index]
+        self.update()
 
     def wheelEvent(self, event) -> None:
         """框選前用滾輪在「整個視窗 ↔ 子區塊」之間切換：往下鑽細，往上放大。"""

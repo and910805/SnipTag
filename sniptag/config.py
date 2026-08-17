@@ -33,6 +33,7 @@ DEFAULTS = {
     "hotkey_topic": "Ctrl+F1",      # 快速切換主題
     "hotkey_repeat": "Ctrl+Shift+F1",   # 重複上次的框選範圍
     "hotkey_hide_pins": "Shift+F3",     # 全部釘圖隱藏 / 顯示
+    "hotkey_close_pins": "Ctrl+Shift+F3",   # 關閉所有釘圖
 }
 
 MAX_RECENT = 12

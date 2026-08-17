@@ -194,11 +194,13 @@ class SettingsDialog(QDialog):
         self.hk_topic = HotkeyEdit(config["hotkey_topic"], self)
         self.hk_repeat = HotkeyEdit(config["hotkey_repeat"], self)
         self.hk_hide = HotkeyEdit(config["hotkey_hide_pins"], self)
+        self.hk_close = HotkeyEdit(config["hotkey_close_pins"], self)
         form.addRow("熱鍵：框選截圖", self.hk_capture)
         form.addRow("熱鍵：快速截圖存檔", self.hk_quick)
         form.addRow("熱鍵：重複上次範圍", self.hk_repeat)
         form.addRow("熱鍵：貼上為釘圖", self.hk_pin)
         form.addRow("熱鍵：隱藏所有釘圖", self.hk_hide)
+        form.addRow("熱鍵：關閉所有釘圖", self.hk_close)
         form.addRow("熱鍵：切換主題", self.hk_topic)
         hotkey_note = QLabel(
             "點一下欄位後直接按下組合鍵即可；Esc 清空代表停用。按下 OK 立即生效。",
@@ -248,4 +250,5 @@ class SettingsDialog(QDialog):
         self.cfg["hotkey_topic"] = self.hk_topic.text().strip()
         self.cfg["hotkey_repeat"] = self.hk_repeat.text().strip()
         self.cfg["hotkey_hide_pins"] = self.hk_hide.text().strip()
+        self.cfg["hotkey_close_pins"] = self.hk_close.text().strip()
         self.cfg.set_topic(self.topic_edit.text())  # 內含 save()

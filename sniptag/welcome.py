@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRect, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import (
     QCheckBox, QDialog, QHBoxLayout, QLabel, QPushButton, QStackedWidget,
     QVBoxLayout, QWidget,
@@ -147,6 +147,56 @@ def _draw_pin(painter: QPainter) -> None:
                      "Shift+F3 一鍵全部收起來。")
 
 
+def _draw_scroll(painter: QPainter) -> None:
+    # 迷你瀏覽器：頂欄是固定的，框選時要避開
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QColor("#1a1d22"))
+    painter.drawRoundedRect(QRectF(16, 16, 280, 158), 8, 8)
+    painter.setBrush(QColor("#343a44"))
+    painter.drawRect(QRectF(16, 18, 280, 24))
+    painter.setPen(QColor(MUTED))
+    painter.setFont(_font(8))
+    painter.drawText(QRectF(26, 18, 240, 24), Qt.AlignVCenter | Qt.AlignLeft,
+                     "網址列／固定標題（避開，不要框）")
+
+    # 內文行
+    painter.setPen(Qt.NoPen)
+    for line in range(6):
+        painter.setBrush(QColor(70, 78, 90))
+        painter.drawRoundedRect(
+            QRectF(36, 56 + line * 18, 210 - (line % 3) * 34, 8), 4, 4)
+
+    # 擷取範圍的藍框
+    painter.setPen(QPen(QColor(BRAND), 2))
+    painter.setBrush(Qt.NoBrush)
+    painter.drawRect(QRectF(26, 48, 244, 118))
+
+    # 滾輪往下的箭頭
+    pen = QPen(QColor(INK), 3)
+    pen.setCapStyle(Qt.RoundCap)
+    painter.setPen(pen)
+    painter.drawLine(QPointF(324, 56), QPointF(324, 108))
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QColor(INK))
+    painter.drawPolygon(QPolygonF([QPointF(324, 122), QPointF(315, 106),
+                                   QPointF(333, 106)]))
+    painter.setPen(QColor(MUTED))
+    painter.setFont(_font(9))
+    painter.drawText(QRectF(342, 58, 112, 60),
+                     Qt.AlignLeft | Qt.AlignVCenter | Qt.TextWordWrap,
+                     "自己用滾輪\n慢慢往下捲")
+
+    # 進度面板
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QColor(PANEL))
+    painter.drawRoundedRect(QRectF(300, 134, 154, 40), 6, 6)
+    painter.setPen(QColor(INK))
+    painter.setFont(_font(8))
+    painter.drawText(QRectF(312, 134, 90, 40), Qt.AlignVCenter | Qt.AlignLeft,
+                     "已接 5 段")
+    _chip(painter, QRectF(404, 143, 42, 22), "完成", BRAND, size=9)
+
+
 def _draw_done(painter: QPainter) -> None:
     painter.setPen(Qt.NoPen)
     painter.setBrush(QColor(BRAND))
@@ -176,6 +226,9 @@ PAGES = (
     ("釘圖與歷史", _draw_pin,
      "按 F 把截圖釘在桌面最上層，對照資料時很好用。\n"
      "最近 30 張都留在「截圖歷史」，手滑關掉也救得回來。"),
+    ("滾動截圖：長文章接成一張", _draw_scroll,
+     "系統匣選單 →「滾動截圖」，框住會捲動的內文（避開固定的標題列）。\n"
+     "藍色外框會標示擷取範圍；用滾輪慢慢捲，捲完按「完成」。"),
     ("開始使用吧", _draw_done, ""),
 )
 
