@@ -38,6 +38,8 @@ jobs:
           python test_msix.py
           python test_effects.py
           python test_welcome.py
+          python test_scroll.py
+          python test_scrollsession.py
 
       - name: 打包 exe
         run: python build.py

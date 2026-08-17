@@ -19,6 +19,7 @@ from .icon import app_icon
 from .naming import Namer
 from .overlay import Overlay
 from .pinwindow import PinWindow
+from .scrollsession import ScrollSession
 from .welcome import WelcomeDialog
 
 
@@ -31,6 +32,7 @@ class SnipTagApp(QObject):
         self.icon = app_icon()
         self.overlay: Overlay | None = None
         self.last_region: QRect | None = None
+        self.scroll_session: ScrollSession | None = None
         self.pins: list[PinWindow] = []
         self.pins_hidden = False
         self.history = History()
@@ -65,6 +67,7 @@ class SnipTagApp(QObject):
             ("擷取作用中視窗", self.capture_active_window),
             ("延時 3 秒截圖", lambda: self.start_delayed_capture(3)),
             ("延時 5 秒截圖", lambda: self.start_delayed_capture(5)),
+            ("滾動截圖（長網頁）…", self.start_scroll_capture),
             None,
             (f"貼上為釘圖\t{self.cfg['hotkey_pin']}", self.paste_pin),
             (f"隱藏／顯示所有釘圖\t{self.cfg['hotkey_hide_pins']}",
@@ -205,6 +208,38 @@ class SnipTagApp(QObject):
                         QSystemTrayIcon.Warning)
             return
         self.start_capture(False, region=rect)
+
+    # --- 滾動截圖 -------------------------------------------------
+    def start_scroll_capture(self) -> None:
+        """先框選要捲動的區域，之後由 ScrollSession 接手。"""
+        if self.overlay is not None or self.scroll_session is not None:
+            return
+        shot = screens.grab_desktop()
+        if shot is None:
+            self.notify("截圖失敗", "無法取得螢幕畫面。", QSystemTrayIcon.Critical)
+            return
+        overlay = Overlay(shot, lambda: "滾動截圖：框住要捲動的範圍", quick=True)
+        overlay.finished.connect(self._on_scroll_region)
+        overlay.cancelled.connect(lambda _pixmap: setattr(self, "overlay", None))
+        self.overlay = overlay
+        overlay.start()
+
+    def _on_scroll_region(self, _pixmap: QPixmap, _action: str,
+                          region: QRect) -> None:
+        self.overlay = None
+        session = ScrollSession(self, region)
+        self.scroll_session = session
+        session.start()
+
+    def finish_scroll(self, pixmap: QPixmap) -> None:
+        pixmap = effects.apply(pixmap, int(self.cfg["round_corners"]),
+                               bool(self.cfg["drop_shadow"]),
+                               bool(self.cfg["add_border"]))
+        self.save_pixmap(pixmap)
+
+    def forget_scroll_session(self, session: ScrollSession) -> None:
+        if self.scroll_session is session:
+            self.scroll_session = None
 
     def _on_capture_cancelled(self, pixmap: QPixmap) -> None:
         self.overlay = None
@@ -419,6 +454,8 @@ class SnipTagApp(QObject):
             subprocess.Popen(["xdg-open", str(directory)])
 
     def quit(self) -> None:
+        if self.scroll_session is not None:
+            self.scroll_session.cancel()
         self.hotkeys.unregister_all()
         self.close_all_pins()
         if self.overlay is not None:
