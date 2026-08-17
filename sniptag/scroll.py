@@ -16,13 +16,15 @@ STRIP = 90              # 當樣板的那一條有多高（實體像素）
 COLUMNS = 96            # 比對時取樣幾個直行
 MIN_ADVANCE = 4         # 少於這麼多像素就當作沒有捲動
 
-# 實測：位置對上時平均像素差是 0，完全沒有重疊時最好也只到 7 左右，
-# 所以 4.0 能乾淨地分開兩者。寧可判定失敗請使用者重來，
-# 也不要硬接出一張錯位的長圖。
+# 螢幕截圖的真實重疊是「同一批像素」，平均差應該趨近 0；
+# 分數低於這個值就直接信（游標閃爍、少量動畫造成的微小差異涵蓋在內）。
+EXACT_THRESHOLD = 0.5
+# 沒那麼精確時的絕對上限：完全無重疊的假匹配實測最好也只到 7 左右。
 MATCH_THRESHOLD = 4.0
-# 文件裡一行行的文字，行距的整數倍會「看起來也很像」。所以除了絕對門檻，
-# 還要求正確位置是個尖銳的低點：必須明顯優於鄰域以外的次佳解。
-RUNNER_UP_RATIO = 0.5
+# 文件裡一行行的文字，行距的整數倍會「看起來也很像」（實測這種假匹配
+# 約 0.9～1.9 分）。不夠精確的匹配必須是個尖銳低點：明顯優於鄰域外的
+# 次佳解才收。寧可判定失敗請使用者重捲，也不要接出錯位的長圖。
+RUNNER_UP_RATIO = 0.25
 
 
 @dataclass
@@ -36,6 +38,8 @@ class Match:
 
     @property
     def confident(self) -> bool:
+        if self.score <= EXACT_THRESHOLD:
+            return True                 # 像素幾乎全等，就是它
         if self.score > MATCH_THRESHOLD:
             return False
         if self.runner_up == float("inf"):

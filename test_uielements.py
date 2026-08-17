@@ -56,7 +56,8 @@ def main() -> None:
     check(merged == [window, panel], "太小的元素（游標等級）不收")
 
     print("打穿自己的視窗（ProbeThrough）")
-    if sys.platform == "win32":
+    # offscreen 平台（CI）的 winId 不是真實 HWND，樣式操作驗不出東西
+    if sys.platform == "win32" and QApplication.platformName() == "windows":
         import ctypes
 
         from PySide6.QtCore import Qt
@@ -88,7 +89,7 @@ def main() -> None:
         check(after == before, "查完樣式完整還原")
         cover.close()
     else:
-        print("  （非 Windows，略過）")
+        print("  （offscreen／非 Windows，略過）")
 
     print("\n全部通過。")
     del app
