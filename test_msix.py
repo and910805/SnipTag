@@ -36,7 +36,7 @@ def main() -> None:
     check(identity is not None, "有 Identity")
     check(identity.get("Name") == EXPECTED_NAME, "Package Name 正確")
     check(identity.get("Publisher") == EXPECTED_PUBLISHER, "Publisher 正確")
-    check(identity.get("Version") == "1.2.2.0", "四段式 Store 版本正確且以 0 結尾")
+    check(identity.get("Version") == "1.3.1.0", "四段式 Store 版本正確且以 0 結尾")
     publisher_name = root.findtext("f:Properties/f:PublisherDisplayName", namespaces=NS)
     check(publisher_name == EXPECTED_DISPLAY_NAME, "Publisher Display Name 正確")
     resources = root.findall("f:Resources/f:Resource", NS)

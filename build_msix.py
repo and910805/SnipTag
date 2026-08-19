@@ -28,8 +28,8 @@ MANIFEST_TEMPLATE = ROOT / "packaging" / "AppxManifest.xml.template"
 # 固定版本讓本機與 GitHub Actions 使用完全相同的 Microsoft 官方工具。
 WINDOWS_SDK_BUILD_TOOLS_VERSION = "10.0.26100.8249"
 # Partner Center 保留第四段給 Store 使用，上傳套件必須以 0 結尾。
-# 這次語言宣告修正需要高於已上傳的 1.2.1.0，因此使用 1.2.2.0。
-MSIX_VERSION = "1.2.2.0"
+# Store 更新套件必須高於目前已發布的版本，並與應用程式 1.3.1 對齊。
+MSIX_VERSION = "1.3.1.0"
 WINDOWS_SDK_PACKAGE_URL = (
     "https://www.nuget.org/api/v2/package/"
     f"Microsoft.Windows.SDK.BuildTools/{WINDOWS_SDK_BUILD_TOOLS_VERSION}"

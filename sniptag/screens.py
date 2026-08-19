@@ -114,37 +114,48 @@ def _win32_monitors() -> dict[str, QRect]:
     return found
 
 
-def enumerate_monitors() -> list[Monitor]:
-    """把 Qt 螢幕與 Win32 螢幕配對起來。
+def pair_monitors(screens: list[tuple[str, QRect, float]],
+                  physical_by_name: dict[str, QRect]) -> list[Monitor]:
+    """把 Qt 螢幕（名稱、邏輯矩形、縮放比）與 Win32 實體矩形配對起來。
 
-    Windows 上 QScreen.name() 就是 '\\\\.\\DISPLAY1' 這種裝置名稱，可直接對上。
-    對不上時退而用「邏輯尺寸 × 縮放比 == 實體尺寸」來配，再不行就自行推算。
+    Qt5 時代 QScreen.name() 是 '\\\\.\\DISPLAY1' 這種裝置名稱，可直接對上；
+    Qt6 改回螢幕型號的友善名稱，對不上是常態。此時用「邏輯座標 × 縮放比」
+    推算預期的實體矩形，在尺寸相同的候選中挑位置最接近的一台——
+    兩台同解析度的螢幕靠尺寸分不出來，必須靠位置。再不行就直接用推算值。
     """
-    physical_by_name = _win32_monitors()
     unclaimed = dict(physical_by_name)
     monitors: list[Monitor] = []
 
-    for screen in QGuiApplication.screens():
-        logical = screen.geometry()
-        dpr = screen.devicePixelRatio() or 1.0
-        name = screen.name()
+    for name, logical, dpr in screens:
+        expected = QRect(
+            round(logical.x() * dpr), round(logical.y() * dpr),
+            round(logical.width() * dpr), round(logical.height() * dpr),
+        )
         physical = unclaimed.pop(name, None)
 
         if physical is None:
-            expected = (round(logical.width() * dpr), round(logical.height() * dpr))
-            for key, rect in list(unclaimed.items()):
-                if (rect.width(), rect.height()) == expected:
-                    physical = unclaimed.pop(key)
-                    break
+            candidates = [
+                key for key, rect in unclaimed.items()
+                if (rect.width(), rect.height()) == (expected.width(), expected.height())
+            ]
+            if candidates:
+                key = min(candidates, key=lambda k: (
+                    unclaimed[k].center() - expected.center()).manhattanLength())
+                physical = unclaimed.pop(key)
 
         if physical is None:
-            physical = QRect(
-                round(logical.x() * dpr), round(logical.y() * dpr),
-                round(logical.width() * dpr), round(logical.height() * dpr),
-            )
+            physical = expected
         monitors.append(Monitor(name, logical, physical, dpr))
 
     return monitors
+
+
+def enumerate_monitors() -> list[Monitor]:
+    return pair_monitors(
+        [(s.name(), s.geometry(), s.devicePixelRatio() or 1.0)
+         for s in QGuiApplication.screens()],
+        _win32_monitors(),
+    )
 
 
 class DesktopShot:
