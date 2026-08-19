@@ -11,6 +11,9 @@
 [![PySide6](https://img.shields.io/badge/PySide6-6.6%2B-41CD52?logo=qt&logoColor=white)](https://doc.qt.io/qtforpython/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D6?logo=windows&logoColor=white)](#系統需求)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Microsoft Store](https://img.shields.io/badge/Microsoft%20Store-立即安裝-0078D4?logo=microsoft&logoColor=white)](https://apps.microsoft.com/detail/9PG3Z9PBD542?hl=zh-tw&gl=TW&ocid=pdpshare)
+
+**[SnipTag 已在 Microsoft Store 上架：立即安裝](https://apps.microsoft.com/detail/9PG3Z9PBD542?hl=zh-tw&gl=TW&ocid=pdpshare)**
 
 <img src="docs/annotate.png" alt="SnipTag 框選與標註畫面" width="820">
 
@@ -72,12 +75,23 @@ Shift+F1 框一下 → 週會_03.png
 ### 系統需求
 
 - Windows 10 / 11
-- Python 3.10 以上
+- Microsoft Store 版不需要另外安裝 Python
+- 從原始碼執行需要 Python 3.10 以上
 
 > 全域熱鍵與視窗偵測使用 Win32 API。在 macOS / Linux 上程式仍可啟動，
 > 但熱鍵與視窗自動偵測不會作用。
 
-### 步驟
+### 推薦：從 Microsoft Store 安裝
+
+[前往 Microsoft Store 安裝 SnipTag](https://apps.microsoft.com/detail/9PG3Z9PBD542?hl=zh-tw&gl=TW&ocid=pdpshare)
+
+- 由 Microsoft Store 簽署與發佈
+- 可透過 Microsoft Store 自動更新
+- 避免直接下載未簽章執行檔時出現的 SmartScreen 警告
+
+Microsoft Store ID：`9PG3Z9PBD542`
+
+### 從原始碼執行（開發者）
 
 ```bash
 git clone https://github.com/and910805/SnipTag.git
@@ -527,14 +541,19 @@ python build_msix.py --skip-exe
 產生的 MSIX 沒有本機簽章，僅用來上傳 Microsoft Partner Center；認證通過後，
 Microsoft Store 會重新簽署並提供安裝與自動更新。不要把 unsigned MSIX 當作一般下載檔發布。
 
+正式上架頁面：[SnipTag — Microsoft Store](https://apps.microsoft.com/detail/9PG3Z9PBD542?hl=zh-tw&gl=TW&ocid=pdpshare)
+
 Store 版的開機啟動由 MSIX `windows.startupTask` 管理，不把版本化的
 `WindowsApps` 路徑寫進登錄檔。使用者可在工作管理員的「啟動應用程式」頁面停用。
 
 ---
 
-## 關於「不明的發行者」
+## 關於 GitHub 直接下載版的 Windows 警告
 
-目前發布的 `SnipTag.exe` **尚未具有受信任的程式碼簽章**，所以 Windows
+一般使用者建議直接從 [Microsoft Store](https://apps.microsoft.com/detail/9PG3Z9PBD542?hl=zh-tw&gl=TW&ocid=pdpshare)
+安裝。Store 版本由 Microsoft Store 簽署與發佈，並支援自動更新。
+
+GitHub Release 目前發布的 `SnipTag.exe` **尚未具有受信任的程式碼簽章**，所以 Windows
 SmartScreen、Smart App Control 或防毒軟體可能會攔下來，說「不知道是誰開發的」。
 
 exe 裡面有寫入完整的檔案內容資訊（產品名稱、版本、著作權、專案網址），

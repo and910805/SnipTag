@@ -57,11 +57,11 @@ def shadow(painter: QPainter, rect: QRect, radius: int = 10) -> None:
 
 
 def window_frame(painter: QPainter, rect: QRect, title: str, dark: bool = False) -> QRect:
-    """畫一個有標題列的視窗，回傳內容區。"""
+    """畫一個 Windows 11 樣式的視窗，回傳內容區。"""
     shadow(painter, rect)
-    bar_height = 34
+    bar_height = 38
     body = QColor("#161a21") if dark else QColor("#ffffff")
-    bar = QColor("#20252e") if dark else QColor("#eef1f5")
+    bar = QColor("#20252e") if dark else QColor("#f3f3f3")
     text = QColor("#c9d1dc") if dark else QColor("#39424f")
 
     painter.setPen(Qt.NoPen)
@@ -73,13 +73,30 @@ def window_frame(painter: QPainter, rect: QRect, title: str, dark: bool = False)
     painter.drawRoundedRect(rect, 10, 10)
     painter.restore()
 
-    for index, color in enumerate(("#ff5f57", "#febc2e", "#28c840")):
-        painter.setBrush(QColor(color))
-        painter.drawEllipse(rect.x() + 14 + index * 18, rect.y() + 12, 10, 10)
+    # 左側應用程式圖示；右側則使用 Windows 11 標準視窗按鈕。
+    painter.setBrush(BRAND)
+    painter.drawRoundedRect(QRect(rect.x() + 12, rect.y() + 11, 16, 16), 3, 3)
+    painter.setPen(QPen(QColor("#ffffff"), 1.5))
+    painter.drawLine(rect.x() + 16, rect.y() + 16, rect.x() + 24, rect.y() + 16)
+    painter.drawLine(rect.x() + 16, rect.y() + 21, rect.x() + 24, rect.y() + 21)
+
+    controls_x = rect.right() - 3 * 46 + 1
+    painter.setPen(QPen(text, 1.2))
+    # 最小化
+    painter.drawLine(controls_x + 18, rect.y() + 20,
+                     controls_x + 28, rect.y() + 20)
+    # 最大化
+    painter.drawRect(QRect(controls_x + 46 + 18, rect.y() + 14, 10, 10))
+    # 關閉
+    close_x = controls_x + 92
+    painter.drawLine(close_x + 18, rect.y() + 14,
+                     close_x + 28, rect.y() + 24)
+    painter.drawLine(close_x + 28, rect.y() + 14,
+                     close_x + 18, rect.y() + 24)
 
     painter.setPen(text)
     painter.setFont(font(9))
-    painter.drawText(rect.x() + 76, rect.y() + 8, rect.width() - 90, 20,
+    painter.drawText(rect.x() + 38, rect.y() + 9, rect.width() - 190, 20,
                      Qt.AlignVCenter | Qt.AlignLeft, title)
     return QRect(rect.x(), rect.y() + bar_height, rect.width(),
                  rect.height() - bar_height)
@@ -186,22 +203,53 @@ def build_desktop() -> QImage:
     painter.scale(DPR, DPR)
 
     gradient = QLinearGradient(0, 0, LOGICAL.width(), LOGICAL.height())
-    gradient.setColorAt(0.0, QColor("#243447"))
-    gradient.setColorAt(1.0, QColor("#111721"))
+    gradient.setColorAt(0.0, QColor("#123d79"))
+    gradient.setColorAt(0.55, QColor("#0b2853"))
+    gradient.setColorAt(1.0, QColor("#07162e"))
     painter.fillRect(LOGICAL, gradient)
+
+    # 簡化的 Windows 11 藍色桌布光帶，避免被誤認為其他平台。
+    painter.setPen(Qt.NoPen)
+    for index, color in enumerate((
+        QColor(64, 153, 255, 30), QColor(43, 111, 230, 34),
+        QColor(113, 191, 255, 20),
+    )):
+        painter.setBrush(color)
+        painter.drawEllipse(QRect(-180 + index * 190, 70 + index * 120,
+                                  1180, 700))
 
     draw_slide(painter)
     draw_notes(painter)
     draw_files(painter)
 
-    # 工作列
+    # Windows 11 置中工作列
     painter.setPen(Qt.NoPen)
-    painter.setBrush(QColor(14, 17, 23, 235))
-    painter.drawRect(QRect(0, 860, LOGICAL.width(), 40))
-    for index in range(6):
-        painter.setBrush(QColor("#2d7ff9") if index == 0 else QColor("#3a4453"))
-        painter.drawRoundedRect(QRect(620 + index * 40, 870, 22, 22), 5, 5)
-    painter.setPen(QColor("#8b97a6"))
+    painter.setBrush(QColor(242, 246, 252, 245))
+    painter.drawRect(QRect(0, 854, LOGICAL.width(), 46))
+
+    # Windows 開始圖示（四片藍色方格）
+    start_x, start_y = 590, 866
+    painter.setBrush(QColor("#1675e0"))
+    for dx, dy in ((0, 0), (10, 0), (0, 10), (10, 10)):
+        painter.drawRect(QRect(start_x + dx, start_y + dy, 8, 8))
+
+    # 搜尋框
+    painter.setBrush(QColor("#ffffff"))
+    painter.drawRoundedRect(QRect(620, 861, 112, 32), 16, 16)
+    painter.setPen(QPen(QColor("#596575"), 1.4))
+    painter.drawEllipse(QRect(635, 870, 10, 10))
+    painter.drawLine(644, 879, 650, 885)
+    painter.setFont(font(8))
+    painter.drawText(QRect(655, 861, 64, 32), Qt.AlignVCenter, "搜尋")
+
+    # 檔案總管與瀏覽器圖示
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QColor("#f5bd2e"))
+    painter.drawRoundedRect(QRect(748, 869, 25, 18), 3, 3)
+    painter.setBrush(QColor("#42a5f5"))
+    painter.drawEllipse(QRect(790, 864, 27, 27))
+
+    painter.setPen(QColor("#354052"))
     painter.setFont(font(8))
     painter.drawText(QRect(LOGICAL.width() - 150, 860, 130, 40),
                      Qt.AlignRight | Qt.AlignVCenter, "上午 11:28\n2026/8/12")
