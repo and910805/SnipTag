@@ -20,6 +20,7 @@ from .naming import Namer
 from .overlay import Overlay
 from .pinwindow import PinWindow
 from .scrollsession import ScrollSession
+from .toast import Toast
 from .welcome import WelcomeDialog
 
 
@@ -37,6 +38,7 @@ class SnipTagApp(QObject):
         self.pins_hidden = False
         self.history = History()
         self.history_dialog: HistoryDialog | None = None
+        self.toast = Toast()
 
         self.tray = QSystemTrayIcon(self.icon, self)
         self.menu = self._build_menu()
@@ -148,8 +150,11 @@ class SnipTagApp(QObject):
             )
 
     def notify(self, title: str, message: str, icon=QSystemTrayIcon.Information) -> None:
-        if self.tray.supportsMessages():
-            self.tray.showMessage(title, message, icon, 2600)
+        # 用自製泡泡而不是 tray.showMessage：原生通知會被專注輔助吃掉，
+        # 而且截圖工具（包含 SnipTag 自己）常常拍不到它。
+        level = {QSystemTrayIcon.Warning: "warning",
+                 QSystemTrayIcon.Critical: "critical"}.get(icon, "info")
+        self.toast.show_message(title, message, level)
 
     # --- 熱鍵 -----------------------------------------------------
     def _register_hotkeys(self) -> None:
@@ -463,5 +468,6 @@ class SnipTagApp(QObject):
         self.close_all_pins()
         if self.overlay is not None:
             self.overlay.close()
+        self.toast.close()
         self.tray.hide()
         self.qapp.quit()

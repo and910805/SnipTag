@@ -10,7 +10,7 @@ from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtWidgets import QApplication
 
-from sniptag.screens import DesktopShot, Monitor
+from sniptag.screens import DesktopShot, Monitor, pair_monitors
 
 LAPTOP = Monitor("\\\\.\\DISPLAY1", QRect(0, 0, 1440, 900), QRect(0, 0, 2880, 1800), 2.0)
 EXTERNAL = Monitor("\\\\.\\DISPLAY2", QRect(1440, 0, 1920, 1080),
@@ -42,9 +42,51 @@ def check(condition: bool, label: str) -> None:
     assert condition, label
 
 
+def check_pairing() -> None:
+    print("Qt 螢幕 x Win32 螢幕配對")
+
+    # Qt5 名稱就是裝置名稱：直接對上，不受列舉順序影響
+    paired = pair_monitors(
+        [("\\\\.\\DISPLAY2", QRect(1920, 0, 1920, 1080), 1.0),
+         ("\\\\.\\DISPLAY1", QRect(0, 0, 1920, 1080), 1.0)],
+        {"\\\\.\\DISPLAY1": QRect(0, 0, 1920, 1080),
+         "\\\\.\\DISPLAY2": QRect(1920, 0, 1920, 1080)},
+    )
+    check(paired[0].physical == QRect(1920, 0, 1920, 1080), "名稱直配：右螢幕")
+    check(paired[1].physical == QRect(0, 0, 1920, 1080), "名稱直配：左螢幕")
+
+    # Qt6 名稱是型號的友善名稱、兩台同解析度、Win32 列舉順序又相反：
+    # 尺寸分不出來，必須靠位置。這正是「兩個螢幕畫面互換」的情境。
+    paired = pair_monitors(
+        [("DELL U2419H", QRect(0, 0, 1920, 1080), 1.0),
+         ("DELL U2419H (2)", QRect(1920, 0, 1920, 1080), 1.0)],
+        {"\\\\.\\DISPLAY2": QRect(1920, 0, 1920, 1080),
+         "\\\\.\\DISPLAY1": QRect(0, 0, 1920, 1080)},
+    )
+    check(paired[0].physical == QRect(0, 0, 1920, 1080), "同解析度靠位置：左配左")
+    check(paired[1].physical == QRect(1920, 0, 1920, 1080), "同解析度靠位置：右配右")
+
+    # 混合 DPI + 名稱對不上：位置推算（邏輯 × 縮放比）仍要配對正確
+    paired = pair_monitors(
+        [("Laptop Display", QRect(0, 0, 1440, 900), 2.0),
+         ("DELL U2419H", QRect(1440, 0, 1920, 1080), 1.0)],
+        {"\\\\.\\DISPLAY2": QRect(2880, 0, 1920, 1080),
+         "\\\\.\\DISPLAY1": QRect(0, 0, 2880, 1800)},
+    )
+    check(paired[0].physical == QRect(0, 0, 2880, 1800), "混合 DPI：筆電配 2880x1800")
+    check(paired[1].physical == QRect(2880, 0, 1920, 1080), "混合 DPI：外接配 1920x1080")
+    check(paired[0].dpr == 2.0 and paired[1].dpr == 1.0, "縮放比跟著 Qt 螢幕走")
+
+    # Win32 列舉不到任何螢幕（例如非 Windows）：用邏輯 × 縮放比自行推算
+    paired = pair_monitors([("X11-1", QRect(0, 0, 1920, 1080), 1.5)], {})
+    check(paired[0].physical == QRect(0, 0, 2880, 1620), "沒有 Win32 資料時自行推算")
+
+
 def main() -> None:
     app = QApplication.instance() or QApplication(sys.argv)
     shot = build_shot()
+
+    check_pairing()
 
     print("整體範圍")
     check(shot.logical_geometry == QRect(0, 0, 3360, 1080), "邏輯桌面 = 1440+1920 寬")
